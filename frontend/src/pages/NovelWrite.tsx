@@ -1603,7 +1603,7 @@ export default function NovelWrite() {
                       className={`chapter-item${c.id === activeId ? " active" : ""}`}
                       onClick={(e) => { e.stopPropagation(); void selectChapter(c.id); }}
                     >
-                      {c.title?.trim() || `${t("write_chapter_n")} ${idx + 1}${t("write_chapter_n_suffix")}`}
+                      {`${t("write_chapter_n")}${idx + 1}${t("write_chapter_n_suffix")}${c.title?.trim() ? ` ${c.title.trim()}` : ""}`}
                     </button>
                     <button
                       type="button"

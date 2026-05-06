@@ -10,7 +10,7 @@ _WS_CHAT = 600
 _BG_INSPIRE = 1800
 _WS_INSPIRE = 800
 _SUMMARY_PER_CHAPTER = 360
-_MAX_PREVIOUS_CHAPTERS = 12
+_MAX_PREVIOUS_CHAPTERS = 20
 
 
 def _get_naming_category_label(category: str, language: Language) -> str:
@@ -78,12 +78,18 @@ def novel_writing_chat_messages(
     )
     
     if chapters:
+        total = len(chapters)
+        shown = chapters[-_MAX_PREVIOUS_CHAPTERS:]
         chapter_lines = []
-        for ch in chapters[:_MAX_PREVIOUS_CHAPTERS]:
+        for ch in shown:
             summary_text = (ch.summary or "").strip()[:_SUMMARY_PER_CHAPTER]
             chapter_lines.append(f"  {ch.sort_order + 1}. {ch.title}" + (f"（概要：{summary_text}）" if summary_text else ""))
         if chapter_lines:
-            system += "\n\n【已有章节】\n" + "\n".join(chapter_lines)
+            header = f"【已有章节】（共 {total} 章"
+            if total > _MAX_PREVIOUS_CHAPTERS:
+                header += f"，此处仅展示最近 {_MAX_PREVIOUS_CHAPTERS} 章"
+            header += "）"
+            system += "\n\n" + header + "\n" + "\n".join(chapter_lines)
     
     if characters:
         char_lines = []

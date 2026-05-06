@@ -856,6 +856,11 @@ def delete_chapter(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="章节不存在")
     db.delete(ch)
     db.commit()
+    remaining = db.query(Chapter).filter(Chapter.novel_id == novel_id).order_by(Chapter.sort_order, Chapter.id).all()
+    for i, c in enumerate(remaining):
+        if c.sort_order != i:
+            c.sort_order = i
+    db.commit()
 
 
 @router.get("/{chapter_id}/versions", response_model=list[ChapterVersionOut])
