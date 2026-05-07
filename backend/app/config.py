@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./inkmind.db"
 
-    default_llm_provider: str = "openai"
+    default_llm_provider: str = "qwen"
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     openai_model: str = "gpt-4o-mini"

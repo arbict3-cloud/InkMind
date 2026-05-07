@@ -1,114 +1,123 @@
-import type { SseAgentStepData } from "@/types/sse";
 import { useI18n } from "@/i18n";
+import type { SseAgentStepData } from "@/types/sse";
 
-export interface AgentStepDisplayProps {
+interface Props {
   steps: SseAgentStepData[];
 }
 
+type StepStatus = "running" | "done" | "error";
+
+interface GroupedStep {
+  rawName: string;
+  tool_name: string;
+  label: string;
+  status: StepStatus;
+  result?: string;
+}
+
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
-  get_novel_context: "📖 获取作品设定",
-  get_previous_chapters: "📋 获取前文概要",
-  get_character_profiles: "👤 获取人物设定",
-  generate_chapter: "✍️ 生成章节正文",
-  finish: "✅ 完成任务",
-  ask_user: "❓ 询问用户",
-  direct_generation: "⚡ 直接生成",
-  flexible_agent: "🤖 智能体生成",
-  react_agent: "🔄 推理生成",
-  auto_audit: "🔍 自动审核",
-  parallel: "⚡ 并行调用",
-  get_novel_state: "📊 获取作品状态",
-  get_chapters: "📋 获取章节列表",
-  get_chapter_detail: "📄 获取章节详情",
-  get_characters: "👤 获取人物设定",
-  get_memos: "📝 获取备忘录",
-  dispatch_generation_task: "🚀 调度生成任务",
-  poll_task_result: "⏳ 轮询任务结果",
-  poll_multiple_tasks: "⏳ 批量轮询任务",
-  save_chapter: "💾 保存章节",
+  get_novel_state: "agent_tool_get_novel_state",
+  get_chapters: "agent_tool_get_chapters",
+  get_chapter_detail: "agent_tool_get_chapter_detail",
+  get_characters: "agent_tool_get_characters",
+  get_memos: "agent_tool_get_memos",
+  dispatch_generation_task: "agent_tool_dispatch_generation_task",
+  poll_task_result: "agent_tool_poll_task_result",
+  poll_multiple_tasks: "agent_tool_poll_multiple_tasks",
+  save_chapter: "agent_tool_save_chapter",
+  ask_user: "agent_tool_ask_user",
 };
 
-function getStepIcon(step: SseAgentStepData): string {
-  switch (step.step_type) {
-    case "tool_call":
-      return "🔧";
-    case "tool_result":
-      return "✓";
-    case "generating":
-      return "✍️";
-    case "evaluating":
-      return "🔍";
-    case "finish":
-      return "✅";
-    default:
-      return "•";
-  }
-}
+function groupSteps(steps: SseAgentStepData[], t: (key: string) => string): GroupedStep[] {
+  const result: GroupedStep[] = [];
+  const pendingCalls = new Map<string, number>();
 
-function getStepLabel(step: SseAgentStepData, t: (key: string) => string): string {
-  const toolName = step.tool_name || "";
-  const displayName = TOOL_DISPLAY_NAMES[toolName] || toolName;
+  for (const step of steps) {
+    if (step.step_type === "tool_call") {
+      const rawName = step.tool_name || "unknown";
+      const displayName = rawName.replace(/^mcp__inkmind__/, "");
+      const idx = result.length;
+      pendingCalls.set(displayName, idx);
+      result.push({
+        rawName,
+        tool_name: displayName,
+        label: `${t("agent_step_calling")} ${displayName}`,
+        status: "running",
+      });
+    } else if (step.step_type === "tool_result") {
+      const rawName = step.tool_name || "unknown";
+      const displayName = rawName.replace(/^mcp__inkmind__/, "");
+      const pendingIdx = pendingCalls.get(displayName);
 
-  switch (step.step_type) {
-    case "tool_call":
-      if (step.is_parallel) {
-        return t("agent_step_parallel_call") || "并行调用工具";
+      if (pendingIdx !== undefined) {
+        result[pendingIdx].status = "done";
+        const preview = step.result_preview || "";
+        if (preview) {
+          result[pendingIdx].result = preview.length > 80 ? preview.slice(0, 80) + "…" : preview;
+        }
+        pendingCalls.delete(displayName);
+      } else {
+        result.push({
+          rawName,
+          tool_name: displayName,
+          label: displayName,
+          status: "done",
+          result: step.result_preview || undefined,
+        });
       }
-      return `${t("agent_step_calling") || "正在调用"} ${displayName}`;
-    case "tool_result":
-      return `${displayName} ${t("agent_step_completed") || "完成"}`;
-    case "generating":
-      return `${t("agent_step_generating") || "正在生成内容"}...`;
-    case "evaluating":
-      return `${t("agent_step_evaluating") || "正在评估内容"}...`;
-    case "finish":
-      return step.thought || (t("agent_step_finished") || "任务完成");
-    default:
-      return displayName;
+    } else if (step.step_type === "generating") {
+      result.push({
+        rawName: "generating",
+        tool_name: "",
+        label: t("agent_step_generating"),
+        status: "running",
+      });
+    } else if (step.step_type === "evaluating") {
+      result.push({
+        rawName: "evaluating",
+        tool_name: "",
+        label: t("agent_step_evaluating"),
+        status: "running",
+      });
+    } else if (step.step_type === "finish") {
+      for (const item of result) {
+        if (item.status === "running") item.status = "done";
+      }
+    }
   }
+
+  return result;
 }
 
-export default function AgentStepDisplay({ steps }: AgentStepDisplayProps) {
+function statusIcon(status: StepStatus) {
+  if (status === "done") return "✓";
+  if (status === "error") return "✗";
+  return "→";
+}
+
+export default function AgentStepDisplay({ steps }: Props) {
   const { t } = useI18n();
 
   if (!steps.length) return null;
 
+  const grouped = groupSteps(steps, t);
+
   return (
     <div className="ai-assistant-agent-steps">
-      {steps.map((step, idx) => {
-        const isActive =
-          step.step_type === "tool_call" ||
-          step.step_type === "generating" ||
-          step.step_type === "evaluating";
-
-        return (
-          <div
-            key={idx}
-            className={`ai-assistant-agent-step${
-              isActive ? " ai-assistant-agent-step--active" : ""
-            }${
-              step.step_type === "tool_result" || step.step_type === "finish"
-                ? " ai-assistant-agent-step--done"
-                : ""
-            }`}
-          >
-            <span className="ai-assistant-agent-step__icon">
-              {getStepIcon(step)}
-            </span>
-            <span className="ai-assistant-agent-step__label">
-              {getStepLabel(step, t)}
-            </span>
-            {step.thought && step.step_type !== "finish" && (
-              <span className="ai-assistant-agent-step__thought">
-                {step.thought}
-              </span>
-            )}
-            {isActive && (
-              <span className="ai-assistant-agent-step__pulse" />
-            )}
-          </div>
-        );
-      })}
+      {grouped.map((group, i) => (
+        <div key={i} className={`ai-assistant-agent-step ai-assistant-agent-step--${group.status}`}>
+          <span className="ai-assistant-agent-step__icon">{statusIcon(group.status)}</span>
+          <span className="ai-assistant-agent-step__label">
+            {group.tool_name
+              ? t(TOOL_DISPLAY_NAMES[group.rawName] || group.rawName) || group.tool_name
+              : group.label}
+          </span>
+          {group.status === "running" && <span className="ai-assistant-agent-step__pulse" />}
+          {group.result && (
+            <span className="ai-assistant-agent-step__result">{group.result}</span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

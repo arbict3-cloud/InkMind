@@ -70,12 +70,13 @@ async def get_novel_state(args: dict[str, Any]) -> dict[str, Any]:
     )
     recent = [
         {
+            "chapter_number": idx,
             "id": ch.id,
             "title": ch.title,
             "summary": (ch.summary or "")[:200],
             "word_count": len(ch.content) if ch.content else 0,
         }
-        for ch in reversed(recent_chapters)
+        for idx, ch in enumerate(reversed(recent_chapters), start=max(1, chapter_count - 2))
     ]
 
     result = {
@@ -113,8 +114,9 @@ async def get_chapters(args: dict[str, Any]) -> dict[str, Any]:
     chapters = query.offset(offset).limit(limit).all()
 
     items = []
-    for ch in chapters:
+    for idx, ch in enumerate(chapters, start=offset + 1):
         item: dict[str, Any] = {
+            "chapter_number": idx,
             "id": ch.id,
             "title": ch.title,
             "summary": (ch.summary or "")[:300],
@@ -145,7 +147,15 @@ async def get_chapter_detail(args: dict[str, Any]) -> dict[str, Any]:
     if not chapter:
         db.close()
         return {"content": [{"type": "text", "text": json.dumps({"error": f"章节 {chapter_id} 不存在"}, ensure_ascii=False)}]}
+
+    chapter_number = (
+        db.query(Chapter)
+        .filter(Chapter.novel_id == _novel_id, Chapter.sort_order <= chapter.sort_order)
+        .count()
+    )
+
     result = {
+        "chapter_number": chapter_number,
         "id": chapter.id,
         "title": chapter.title,
         "summary": chapter.summary,
@@ -197,7 +207,7 @@ async def get_memos(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "dispatch_generation_task",
-    "调度内容生成任务到子智能体（Qwen/Minimax 等）。任务异步执行，立即返回任务 ID，需要用 poll_task_result 轮询结果。",
+    "调度内容生成任务到子智能体。任务异步执行，立即返回任务 ID，需要用 poll_task_result 轮询结果。",
     {"task_type": str, "params": dict},
 )
 async def dispatch_generation_task(args: dict[str, Any]) -> dict[str, Any]:
@@ -206,16 +216,7 @@ async def dispatch_generation_task(args: dict[str, Any]) -> dict[str, Any]:
 
     from app.config import settings
     if "sub_agent_provider" not in params:
-        if settings.qwen_api_key:
-            params["sub_agent_provider"] = "qwen"
-        elif settings.minimax_api_key:
-            params["sub_agent_provider"] = "minimax"
-        elif settings.deepseek_api_key:
-            params["sub_agent_provider"] = "deepseek"
-        elif settings.openai_api_key:
-            params["sub_agent_provider"] = "openai"
-        else:
-            params["sub_agent_provider"] = settings.default_llm_provider
+        params["sub_agent_provider"] = settings.default_llm_provider
 
     queue = get_task_queue()
     task_id = await queue.submit(task_type=task_type, params=params)
@@ -361,4 +362,4 @@ ALL_TOOLS = [
     ask_user,
 ]
 
-ALL_TOOL_NAMES = [f"mcp__inkmind__{t.name}" for t in ALL_TOOLS]
+ALL_TOOL_NAMES = [f"InkMind::{t.name}" for t in ALL_TOOLS]

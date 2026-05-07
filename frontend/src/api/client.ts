@@ -936,23 +936,15 @@ export function connectSse(
 
       const dec = new TextDecoder();
       let buffer = "";
+      let currentEvent = "";
+      let currentData = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (value) buffer += dec.decode(value, { stream: true });
-        if (done) break;
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        let currentEvent = "";
-        let currentData = "";
-
+      function processLines(lines: string[]) {
         for (const line of lines) {
           if (line.startsWith("event: ")) {
             currentEvent = line.slice(7).trim();
           } else if (line.startsWith("data: ")) {
-            currentData = line.slice(6);
+            currentData += line.slice(6);
           } else if (line === "" && currentEvent && currentData) {
             try {
               const parsed = JSON.parse(currentData);
@@ -987,8 +979,28 @@ export function connectSse(
             }
             currentEvent = "";
             currentData = "";
+          } else if (line === "") {
+            currentEvent = "";
+            currentData = "";
           }
         }
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (value) buffer += dec.decode(value, { stream: true });
+        if (done) {
+          const tail = buffer.trim();
+          if (tail) {
+            const lines = tail.split("\n");
+            processLines(lines);
+          }
+          break;
+        }
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        processLines(lines);
       }
     })
     .catch((err) => {

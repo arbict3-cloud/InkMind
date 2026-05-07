@@ -98,11 +98,20 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 
   const ensureSession = useCallback(async () => {
     if (session) return session;
+    return await createNewSession();
+  }, [session, novelId]);
+
+  const createNewSession = useCallback(async () => {
     const s = await createAgentSession(novelId!);
     setSession(s);
     saveJson(`${SESSION_KEY}_${novelId}`, s);
     return s;
-  }, [session, novelId]);
+  }, [novelId]);
+
+  const resetSession = useCallback(() => {
+    setSession(null);
+    try { localStorage.removeItem(`${SESSION_KEY}_${novelId}`); } catch { /* ignore */ }
+  }, [novelId]);
 
   const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
@@ -156,6 +165,30 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
   }, [isResizing, panelSize]);
 
+  const buildChatHandlers = useCallback((aid: string) => ({
+    onPatch: (data: any) => {
+      if (data.message?.role === "assistant") {
+        setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: data.message?.content || "", isStreaming: data.message?.is_streaming } : m));
+      }
+    },
+    onDelta: (data: any) => {
+      if (data.type === "text" && data.content) {
+        setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: m.content + data.content } : m));
+      }
+    },
+    onAgentStep: (data: any) => {
+      console.log("[AgentStep]", data.step_type, data.tool_name);
+      setAgentSteps((prev) => [...prev, data]);
+    },
+    onQuestion: (data: any) => {
+      console.log("[Question]", data.question, data.options);
+      setPendingQuestion(data);
+    },
+    onStatus: (data: any) => { setStatus(data.status || "idle"); },
+    onDone: () => { setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, isStreaming: false } : m)); setIsLoading(false); },
+    onError: (data: any) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },
+  }), []);
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || isLoading || !novelId) return;
@@ -172,28 +205,33 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       const aid = generateId();
       setMessages((prev) => [...prev, { id: aid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true }]);
 
-      await agentChat(novelId, cur.session_id, text, {
-        onPatch: (data) => {
-          if (data.message?.role === "assistant") {
-            setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: data.message?.content || "", isStreaming: data.message?.is_streaming } : m));
+      const handlers = buildChatHandlers(aid);
+      const retryOnError: typeof handlers = {
+        ...handlers,
+        onError: async (data: any) => {
+          const msg = data.message || "";
+          if (msg.includes("会话不存在") || msg.includes("not found")) {
+            resetSession();
+            try {
+              const newSess = await createNewSession();
+              const retryHandlers = buildChatHandlers(aid);
+              await agentChat(novelId, newSess.session_id, text, retryHandlers);
+            } catch {
+              setMessages((prev) => [...prev, { id: generateId(), role: "error", content: "创建新会话失败", timestamp: Date.now() }]);
+              setIsLoading(false);
+            }
+          } else {
+            handlers.onError(data);
           }
         },
-        onDelta: (data) => {
-          if (data.type === "text" && data.content) {
-            setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: m.content + data.content } : m));
-          }
-        },
-        onAgentStep: (data) => { setAgentSteps((prev) => [...prev, data]); },
-        onQuestion: (data) => { setPendingQuestion(data); },
-        onStatus: (data) => { setStatus(data.status || "idle"); },
-        onDone: () => { setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, isStreaming: false } : m)); setIsLoading(false); },
-        onError: (data) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },
-      });
+      };
+
+      await agentChat(novelId, cur.session_id, text, retryOnError);
     } catch (err) {
       setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
       setIsLoading(false);
     }
-  }, [input, isLoading, novelId, ensureSession]);
+  }, [input, isLoading, novelId, ensureSession, resetSession, createNewSession, buildChatHandlers]);
 
   const handleAnswerQuestion = useCallback(async (questionId: string, answer: string, selectedOption?: string) => {
     if (!session || !pendingQuestion) return;
@@ -206,19 +244,31 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     try {
       const aid = generateId();
       setMessages((prev) => [...prev, { id: aid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true }]);
-      await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption, {
-        onDelta: (data) => { if (data.type === "text" && data.content) setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: m.content + data.content } : m)); },
-        onAgentStep: (data) => { setAgentSteps((prev) => [...prev, data]); },
-        onQuestion: (data) => { setPendingQuestion(data); },
-        onStatus: (data) => { setStatus(data.status || "idle"); },
-        onDone: () => { setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, isStreaming: false } : m)); setIsLoading(false); },
-        onError: (data) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },
-      });
+      const handlers = buildChatHandlers(aid);
+      const retryOnError = {
+        ...handlers,
+        onError: async (data: any) => {
+          const msg = data.message || "";
+          if (msg.includes("会话不存在") || msg.includes("not found")) {
+            resetSession();
+            try {
+              const newSess = await createNewSession();
+              await agentAnswerQuestion(novelId!, newSess.session_id, questionId, answer, selectedOption, buildChatHandlers(aid));
+            } catch {
+              setMessages((prev) => [...prev, { id: generateId(), role: "error", content: "创建新会话失败", timestamp: Date.now() }]);
+              setIsLoading(false);
+            }
+          } else {
+            handlers.onError(data);
+          }
+        },
+      };
+      await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption, retryOnError);
     } catch (err) {
       setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
       setIsLoading(false);
     }
-  }, [session, pendingQuestion, novelId]);
+  }, [session, pendingQuestion, novelId, resetSession, createNewSession, buildChatHandlers]);
 
   const getToolDisplayName = (name: string) => {
     const key = TOOL_DISPLAY_NAMES[name];
@@ -290,13 +340,22 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
             {messages.map((msg) => (
               <div key={msg.id} className={`agent-message agent-message-${msg.role}`}>
                 {msg.role === "user" ? (
-                  <div className="agent-message-content">{msg.content}</div>
+                  <div className="agent-message-content agent-message-content--user">{msg.content}</div>
                 ) : msg.role === "error" ? (
-                  <div className="agent-message-content agent-message-error">{msg.content}</div>
+                  <div className="agent-message-content agent-message-content--error">{msg.content}</div>
                 ) : (
-                  <div className="agent-message-content">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    {msg.isStreaming && <span className="agent-cursor">▊</span>}
+                  <div className="agent-message-content agent-message-content--assistant">
+                    <div className="agent-message-avatar">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                        <path d="M2 17l10 5 10-5" />
+                        <path d="M2 12l10 5 10-5" />
+                      </svg>
+                    </div>
+                    <div className="agent-message-body">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      {msg.isStreaming && <span className="agent-cursor">▊</span>}
+                    </div>
                   </div>
                 )}
               </div>
@@ -319,7 +378,6 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
               onKeyDown={handleKeyDown}
               placeholder={t("agent_chat_placeholder")}
               disabled={isLoading}
-              rows={2}
             />
             <button
               className="agent-send-btn"

@@ -127,6 +127,7 @@ async def agent_chat(
     async def gen():
         try:
             async for event in orchestrator.chat(session, body.message):
+                log.debug("SSE send: event_type=%s", event.event_type)
                 yield event.encode()
         except Exception as e:
             log.exception("Agent chat error")
@@ -163,6 +164,7 @@ async def answer_question(
             async for event in orchestrator.answer_question(
                 session, body.question_id, body.answer, body.selected_option
             ):
+                log.debug("SSE send (answer): event_type=%s", event.event_type)
                 yield event.encode()
         except Exception as e:
             log.exception("Agent answer_question error")
