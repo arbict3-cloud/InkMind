@@ -3,6 +3,7 @@ from app.models import Chapter, Character, Novel
 from app.schemas.ai import NovelNamingIn
 from app.language import Language
 from app.prompts import get_prompt
+from app.agent.memory import NovelMemory
 
 _BG_NAMING = 1000
 _BG_CHAT = 900
@@ -59,23 +60,37 @@ def novel_writing_chat_messages(
     language: Language = "zh",
     chapters: list[Chapter] | None = None,
     characters: list[Character] | None = None,
+    db=None,
 ) -> tuple[str, str]:
-    bg = (novel.background or "").strip()[:_BG_CHAT]
-    ws = (novel.writing_style or "").strip()[:_WS_CHAT]
-    
-    title = novel.title or get_prompt("common_untitled", language)
-    genre = novel.genre or get_prompt("common_unspecified", language)
-    bg_display = bg or get_prompt("common_not_filled", language)
-    ws_display = ws or get_prompt("common_not_filled", language)
-    
-    system = get_prompt(
-        "chat_system", 
-        language, 
-        title=title, 
-        genre=genre, 
-        background=bg_display,
-        writing_style=ws_display
-    )
+    if db is not None:
+        from sqlalchemy.orm import Session
+        memory = NovelMemory(db, novel)
+        lightweight = memory.build_lightweight_context()
+        title = novel.title or get_prompt("common_untitled", language)
+        genre = novel.genre or get_prompt("common_unspecified", language)
+        system = get_prompt(
+            "chat_system",
+            language,
+            title=title,
+            genre=genre,
+            background=lightweight,
+            writing_style=(novel.writing_style or "").strip()[:_WS_CHAT] or get_prompt("common_not_filled", language),
+        )
+    else:
+        bg = (novel.background or "").strip()[:_BG_CHAT]
+        ws = (novel.writing_style or "").strip()[:_WS_CHAT]
+        title = novel.title or get_prompt("common_untitled", language)
+        genre = novel.genre or get_prompt("common_unspecified", language)
+        bg_display = bg or get_prompt("common_not_filled", language)
+        ws_display = ws or get_prompt("common_not_filled", language)
+        system = get_prompt(
+            "chat_system",
+            language,
+            title=title,
+            genre=genre,
+            background=bg_display,
+            writing_style=ws_display,
+        )
     
     if chapters:
         total = len(chapters)

@@ -14,6 +14,7 @@ from app.agent.tools import (
     GetNovelContextTool,
     GetPreviousChaptersTool,
 )
+from app.agent.ask_user import AskUserTool
 from app.llm.base import LLMProvider
 from app.llm.ndjson_stream import filter_think_chunks
 from app.models import Chapter, Novel
@@ -204,6 +205,7 @@ def run_react_chapter_generation(
         GetCharacterProfilesTool(db, novel),
         GetNovelContextTool(db, novel),
         GenerateChapterTool(db, novel, llm, word_count=word_count, language=language),
+        AskUserTool(),
     ]
 
     task = _build_react_task(chapter_summary, fixed_title, word_count=word_count, language=language)
@@ -356,6 +358,7 @@ def run_flexible_chapter_generation(
         GetCharacterProfilesTool(db, novel),
         GetNovelContextTool(db, novel),
         GenerateChapterTool(db, novel, llm, word_count=word_count, language=language),
+        AskUserTool(),
         FinishTool(),
     ]
 

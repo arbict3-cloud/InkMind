@@ -274,6 +274,7 @@ _FLEXIBLE_SYSTEM_PROMPT = """你是一位专业的小说作者，正在使用一
 - `get_previous_chapters(limit=3)`：获取作品的前 N 章概要，用于了解故事进展
 - `get_character_profiles(chapter_summary="...")`：根据本章概要召回可能涉及的人物设定
 - `generate_chapter(chapter_summary="...", fixed_title=null)`：生成章节正文（支持流式输出）
+- `ask_user(question="...", options=[], allow_custom=true, header="...")`：向用户提问以获取确认、选择或补充信息。当你需要用户决策（如选择视角人物、确定氛围等）时使用此工具
 - `finish(reason="...")`：完成任务（只能在生成正文后调用）
 
 **并行调用示例**（推荐）：

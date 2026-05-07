@@ -2,158 +2,22 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { useI18n } from "@/i18n";
 import {
-  type WorkflowProgress,
-  type PhaseDisplayResult,
-  type CreateWorkflowRequest,
-  type WorkflowPhaseType,
-  PHASE_NAMES,
-} from "@/types/workflow";
-import {
-  createWorkflow,
-  executePhase,
-  executePhaseStream,
-  confirmPhase,
-  saveWorkflowChapter,
-  fetchWorkflowProgress,
-  novelAiChat,
+  createAgentSession,
+  agentChat,
+  agentAnswerQuestion,
+  type AgentSession,
 } from "@/api/client";
+import type { PendingQuestionData, SseAgentStepData } from "@/types/sse";
+import AskUserQuestion from "@/components/AskUserQuestion";
+import AgentStepDisplay from "@/components/AgentStepDisplay";
 import type { Chapter } from "@/types";
 
-function AiIcon({ size = 24 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      {/* background */}
-      <circle cx="16" cy="16" r="14" fill="#F5FAFF" />
-      <circle cx="16" cy="16" r="14" stroke="#3E4754" strokeWidth="2" />
-
-      {/* pen nib body */}
-      <path
-        d="M16 6.3L10.5 16.2C9.8 17.5 9.65 18.6 10 20.1L11 24.3C11.25 25.4 12.1 26.1 13.2 26.3L16 26.7L18.8 26.3C19.9 26.1 20.75 25.4 21 24.3L22 20.1C22.35 18.6 22.2 17.5 21.5 16.2L16 6.3Z"
-        fill="#8FB4E8"
-      />
-
-      {/* pen outline */}
-      <path
-        d="M16 6.3L10.5 16.2C9.8 17.5 9.65 18.6 10 20.1L11 24.3C11.25 25.4 12.1 26.1 13.2 26.3L16 26.7L18.8 26.3C19.9 26.1 20.75 25.4 21 24.3L22 20.1C22.35 18.6 22.2 17.5 21.5 16.2L16 6.3Z"
-        stroke="#5878A5"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-
-      {/* center slit */}
-      <path
-        d="M16 6.4V16.2"
-        stroke="#5878A5"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
-
-      {/* center node */}
-      <circle
-        cx="16"
-        cy="16.5"
-        r="1.2"
-        fill="#F5FAFF"
-        stroke="#5878A5"
-        strokeWidth="1.2"
-      />
-
-      {/* 🔥 极简花纹（只保留一点AI感） */}
-      <path
-        d="M16 17.8V20"
-        stroke="#EAF4FF"
-        strokeWidth="1"
-        strokeLinecap="round"
-      />
-      <circle cx="14" cy="19" r="0.7" fill="#EAF4FF" />
-      <circle cx="18" cy="19" r="0.7" fill="#EAF4FF" />
-
-      {/* face */}
-      <circle cx="13.9" cy="21.8" r="0.6" fill="#4B4B4B" />
-      <circle cx="18.1" cy="21.8" r="0.6" fill="#4B4B4B" />
-      <path
-        d="M14.8 23C15.3 23.5 16.7 23.5 17.2 23"
-        stroke="#4B4B4B"
-        strokeWidth="0.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-const POSITION_KEY = "inkmind_ai_assistant_position";
-const DEFAULT_POSITION = { x: -16, y: 72 };
-
-const PANEL_SIZE_KEY = "inkmind_ai_assistant_panel_size";
-const DEFAULT_PANEL_SIZE = { width: 560, height: 820 };
-const MIN_PANEL_SIZE = { width: 320, height: 400 };
-
-interface DragPosition {
-  x: number;
-  y: number;
-}
-
-interface PanelSize {
-  width: number;
-  height: number;
-}
-
-function getStoredPosition(): DragPosition {
-  try {
-    const stored = localStorage.getItem(POSITION_KEY);
-    if (stored) {
-      return JSON.parse(stored);
-    }
-  } catch {
-    /* ignore */
-  }
-  return DEFAULT_POSITION;
-}
-
-function setStoredPosition(pos: DragPosition): void {
-  try {
-    localStorage.setItem(POSITION_KEY, JSON.stringify(pos));
-  } catch {
-    /* ignore */
-  }
-}
-
-function getStoredPanelSize(): PanelSize {
-  try {
-    const stored = localStorage.getItem(PANEL_SIZE_KEY);
-    if (stored) {
-      const size = JSON.parse(stored);
-      return {
-        width: Math.max(size.width, MIN_PANEL_SIZE.width),
-        height: Math.max(size.height, MIN_PANEL_SIZE.height),
-      };
-    }
-  } catch {
-    /* ignore */
-  }
-  return DEFAULT_PANEL_SIZE;
-}
-
-function setStoredPanelSize(size: PanelSize): void {
-  try {
-    localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify(size));
-  } catch {
-    /* ignore */
-  }
-}
-
-function formatMessage(template: string, params: Record<string, unknown>): string {
-  let result = template;
-  for (const [key, value] of Object.entries(params)) {
-    result = result.replace(new RegExp(`\\{${key}\\}`, "g"), String(value));
-  }
-  return result;
+interface AgentMessage {
+  id: string;
+  role: "user" | "assistant" | "system" | "error";
+  content: string;
+  timestamp: number;
+  isStreaming?: boolean;
 }
 
 export interface AiAssistantFloatingProps {
@@ -161,1200 +25,320 @@ export interface AiAssistantFloatingProps {
   onChapterSaved?: (chapter: Partial<Chapter> & { id: number; title: string }) => void;
 }
 
-type MessageRole = "user" | "assistant" | "system" | "error";
-
-interface Message {
-  id: string;
-  role: MessageRole;
-  content: string;
-  timestamp: number;
-  isStreaming?: boolean;
-  isEditable?: boolean;
-  editableContent?: Record<string, string>;
-}
-
-interface WriterState {
-  workflowId: string | null;
-  progress: WorkflowProgress | null;
-  targetChapterCount: number;
-  completedChapterCount: number;
-  currentChapter: {
-    index: number;
-    title: string;
-    summary: string;
-    content: string;
-  } | null;
-  isWaiting: boolean;
-}
-
-const SESSION_KEY = "inkmind_ai_assistant_session";
+const POSITION_KEY = "inkmind_ai_position";
+const DEFAULT_POSITION = { x: -16, y: 72 };
+const PANEL_SIZE_KEY = "inkmind_ai_panel_size";
+const DEFAULT_PANEL_SIZE = { width: 520, height: 780 };
+const MIN_PANEL_SIZE = { width: 340, height: 400 };
+const SESSION_KEY = "inkmind_agent_session";
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 }
 
-function getStoredSession(novelId?: number): { workflowId: string | null } | null {
-  if (!novelId) return null;
+function loadJson<T>(key: string, fallback: T): T {
   try {
-    const key = `${SESSION_KEY}_${novelId}`;
-    const stored = localStorage.getItem(key);
-    if (stored) {
-      return JSON.parse(stored);
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return fallback;
 }
 
-function setStoredSession(novelId: number | undefined, workflowId: string | null): void {
-  if (!novelId) return;
-  try {
-    const key = `${SESSION_KEY}_${novelId}`;
-    if (workflowId) {
-      localStorage.setItem(key, JSON.stringify({ workflowId }));
-    } else {
-      localStorage.removeItem(key);
-    }
-  } catch {
-    /* ignore */
-  }
+function saveJson(key: string, value: unknown): void {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
 }
 
-function parseInstruction(message: string): { type: string; params: Record<string, unknown> } {
-  const lowerMsg = message.toLowerCase();
-  
-  const chapterMatch = lowerMsg.match(/(\d+)\s*(章|chapter)/);
-  const chapterCount = chapterMatch ? parseInt(chapterMatch[1]) : 1;
-  
-  const isQuestion = /^(如何|怎么|为什么|为何|怎样|什么|哪些|能否|可以|是否|帮|请|建议|推荐|分析|评价|点评|如何写好|怎样写|怎么写)/i.test(message.trim()) ||
-    message.trim().endsWith("？") || message.trim().endsWith("?");
-  
-  if (!isQuestion && (lowerMsg.includes("写") || lowerMsg.includes("继续") || lowerMsg.includes("生成") || 
-      lowerMsg.includes("write") || lowerMsg.includes("continue") || lowerMsg.includes("generate"))) {
-    if (chapterCount > 1) {
-      return { type: "generate_multiple", params: { count: chapterCount } };
-    }
-    return { type: "generate_one", params: {} };
-  }
-  
-  if (!isQuestion && (lowerMsg.includes("修改") || lowerMsg.includes("改") || lowerMsg.includes("modify") || lowerMsg.includes("change"))) {
-    return { type: "modify", params: { instruction: message } };
-  }
-  
-  if (lowerMsg.includes("确认") || lowerMsg.includes("继续写") || lowerMsg.includes("下一章") ||
-      lowerMsg.includes("confirm") || lowerMsg.includes("next")) {
-    return { type: "confirm", params: {} };
-  }
-  
-  if (lowerMsg.includes("取消") || lowerMsg.includes("停止") || lowerMsg.includes("cancel") || lowerMsg.includes("stop")) {
-    return { type: "cancel", params: {} };
-  }
-  
-  if (lowerMsg.includes("保存") || lowerMsg.includes("save")) {
-    return { type: "save", params: {} };
-  }
-  
-  return { type: "question", params: { question: message } };
-}
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  get_novel_state: "agent_tool_get_novel_state",
+  get_chapters: "agent_tool_get_chapters",
+  get_chapter_detail: "agent_tool_get_chapter_detail",
+  get_characters: "agent_tool_get_characters",
+  get_memos: "agent_tool_get_memos",
+  dispatch_generation_task: "agent_tool_dispatch_generation_task",
+  poll_task_result: "agent_tool_poll_task_result",
+  poll_multiple_tasks: "agent_tool_poll_multiple_tasks",
+  save_chapter: "agent_tool_save_chapter",
+  ask_user: "agent_tool_ask_user",
+};
 
-export default function AiAssistantFloating({ novelId, onChapterSaved }: AiAssistantFloatingProps) {
+export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProps) {
   const { t } = useI18n();
-  
+
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputValue, setInputValue] = useState("");
-  const [isBusy, setIsBusy] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
-  
-  const [writerState, setWriterState] = useState<WriterState>({
-    workflowId: null,
-    progress: null,
-    targetChapterCount: 0,
-    completedChapterCount: 0,
-    currentChapter: null,
-    isWaiting: false,
-  });
-  
-  const [editFields, setEditFields] = useState<Record<string, string>>({});
-  
-  const [savedChapterTitles, setSavedChapterTitles] = useState<string[]>([]);
-  
-  const [otherOptionInput, setOtherOptionInput] = useState("");
-  
-  const [position, setPosition] = useState<DragPosition>(getStoredPosition);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{ x: number; y: number; posX: number; posY: number } | null>(null);
-  
-  const [panelSize, setPanelSize] = useState<PanelSize>(getStoredPanelSize);
-  const [isResizing, setIsResizing] = useState(false);
-  const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
-  
+  const [session, setSession] = useState<AgentSession | null>(null);
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [agentSteps, setAgentSteps] = useState<SseAgentStepData[]>([]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionData | null>(null);
+  const [status, setStatus] = useState<string>("idle");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const initializedRef = useRef(false);
-  
+
+  const [position, setPosition] = useState(() => loadJson(POSITION_KEY, DEFAULT_POSITION));
+  const [panelSize, setPanelSize] = useState(() => loadJson(PANEL_SIZE_KEY, DEFAULT_PANEL_SIZE));
+  const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const resizeRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, agentSteps]);
+
+  useEffect(() => {
+    if (!isOpen || !novelId || initializedRef.current) return;
+    initializedRef.current = true;
+    const stored = loadJson<{ session_id: string; novel_id: number } | null>(`${SESSION_KEY}_${novelId}`, null);
+    if (stored?.session_id && stored.novel_id === novelId) {
+      setSession(stored as AgentSession);
+    }
+  }, [isOpen, novelId]);
+
+  const ensureSession = useCallback(async () => {
+    if (session) return session;
+    const s = await createAgentSession(novelId!);
+    setSession(s);
+    saveJson(`${SESSION_KEY}_${novelId}`, s);
+    return s;
+  }, [session, novelId]);
+
   const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
-    e.stopPropagation();
-    
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    
-    dragStartRef.current = {
-      x: clientX,
-      y: clientY,
-      posX: position.x,
-      posY: position.y,
-    };
+    const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
+    dragRef.current = { x: cx, y: cy, px: position.x, py: position.y };
     setIsDragging(true);
   }, [position]);
-  
-  const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
-    if (!isDragging || !dragStartRef.current) return;
-    
-    const clientX = "touches" in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
-    const clientY = "touches" in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
-    
-    const deltaX = clientX - dragStartRef.current.x;
-    const deltaY = clientY - dragStartRef.current.y;
-    
-    let newX = dragStartRef.current.posX + deltaX;
-    let newY = dragStartRef.current.posY + deltaY;
-    
-    newX = Math.min(-16, Math.max(-(window.innerWidth - 100), newX));
-    newY = Math.max(0, Math.min(window.innerHeight - 100, newY));
-    
-    setPosition({ x: newX, y: newY });
-  }, [isDragging]);
-  
-  const handleDragEnd = useCallback(() => {
-    if (isDragging) {
-      setIsDragging(false);
-      setStoredPosition(position);
-      dragStartRef.current = null;
-    }
+
+  useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      if (!dragRef.current) return;
+      const cx = "touches" in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
+      const cy = "touches" in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
+      const nx = Math.min(-16, Math.max(-(window.innerWidth - 100), dragRef.current.px + cx - dragRef.current.x));
+      const ny = Math.max(0, Math.min(window.innerHeight - 100, dragRef.current.py + cy - dragRef.current.y));
+      setPosition({ x: nx, y: ny });
+    };
+    const onUp = () => { setIsDragging(false); saveJson(POSITION_KEY, position); dragRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
   }, [isDragging, position]);
-  
+
   const handleResizeStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
-    e.stopPropagation();
-    
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    
-    resizeStartRef.current = {
-      x: clientX,
-      y: clientY,
-      width: panelSize.width,
-      height: panelSize.height,
-    };
+    const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
+    resizeRef.current = { x: cx, y: cy, w: panelSize.width, h: panelSize.height };
     setIsResizing(true);
   }, [panelSize]);
-  
-  const handleResizeMove = useCallback((e: MouseEvent | TouchEvent) => {
-    if (!isResizing || !resizeStartRef.current) return;
-    
-    const clientX = "touches" in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
-    const clientY = "touches" in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
-    
-    const deltaX = clientX - resizeStartRef.current.x;
-    const deltaY = clientY - resizeStartRef.current.y;
-    
-    let newWidth = resizeStartRef.current.width - deltaX;
-    let newHeight = resizeStartRef.current.height + deltaY;
-    
-    newWidth = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, newWidth));
-    newHeight = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, newHeight));
-    
-    setPanelSize({ width: newWidth, height: newHeight });
-  }, [isResizing]);
-  
-  const handleResizeEnd = useCallback(() => {
-    if (isResizing) {
-      setIsResizing(false);
-      setStoredPanelSize(panelSize);
-      resizeStartRef.current = null;
-    }
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      if (!resizeRef.current) return;
+      const cx = "touches" in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
+      const cy = "touches" in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
+      const nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, resizeRef.current.w - (cx - resizeRef.current.x)));
+      const nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, resizeRef.current.h + (cy - resizeRef.current.y)));
+      setPanelSize({ width: nw, height: nh });
+    };
+    const onUp = () => { setIsResizing(false); saveJson(PANEL_SIZE_KEY, panelSize); resizeRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
   }, [isResizing, panelSize]);
-  
-  useEffect(() => {
-    if (isDragging) {
-      window.addEventListener("mousemove", handleDragMove);
-      window.addEventListener("mouseup", handleDragEnd);
-      window.addEventListener("touchmove", handleDragMove, { passive: false });
-      window.addEventListener("touchend", handleDragEnd);
-    }
-    
-    return () => {
-      window.removeEventListener("mousemove", handleDragMove);
-      window.removeEventListener("mouseup", handleDragEnd);
-      window.removeEventListener("touchmove", handleDragMove);
-      window.removeEventListener("touchend", handleDragEnd);
-    };
-  }, [isDragging, handleDragMove, handleDragEnd]);
-  
-  useEffect(() => {
-    if (isResizing) {
-      window.addEventListener("mousemove", handleResizeMove);
-      window.addEventListener("mouseup", handleResizeEnd);
-      window.addEventListener("touchmove", handleResizeMove, { passive: false });
-      window.addEventListener("touchend", handleResizeEnd);
-    }
-    
-    return () => {
-      window.removeEventListener("mousemove", handleResizeMove);
-      window.removeEventListener("mouseup", handleResizeEnd);
-      window.removeEventListener("touchmove", handleResizeMove);
-      window.removeEventListener("touchend", handleResizeEnd);
-    };
-  }, [isResizing, handleResizeMove, handleResizeEnd]);
-  
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-  
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
-  
-  const addMessage = useCallback((role: MessageRole, content: string, options?: Partial<Message>): string => {
-    const id = generateId();
-    const msg: Message = {
-      id,
-      role,
-      content,
-      timestamp: Date.now(),
-      ...options,
-    };
-    setMessages((prev) => [...prev, msg]);
-    return id;
-  }, []);
-  
-  const updateMessage = useCallback((id: string, updates: Partial<Message>) => {
-    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
-  }, []);
-  
-  const addSystemMessage = useCallback((content: string) => {
-    return addMessage("system", content);
-  }, [addMessage]);
-  
-  const addAssistantMessage = useCallback((content: string, options?: Partial<Message>) => {
-    return addMessage("assistant", content, options);
-  }, [addMessage]);
-  
-  const addErrorMessage = useCallback((content: string) => {
-    return addMessage("error", content);
-  }, [addMessage]);
-  
-  const formatPhaseResult = useCallback((result: PhaseDisplayResult, phase: WorkflowPhaseType): string => {
-    if (!result.success) {
-      return `${t("workflow_status_failed")}: ${result.error_message || t("common_unknown_error")}`;
-    }
-    
-    const phaseName = t(PHASE_NAMES[phase].key);
-    let content = `**${phaseName}** ${t("workflow_result_complete")}\n\n`;
-    
-    if (result.suggestions && result.suggestions.length > 0) {
-      content += `**${t("workflow_suggestions")}**:\n`;
-      result.suggestions.forEach((s, i) => {
-        content += `${i + 1}. ${s}\n`;
-      });
-    }
-    
-    if (result.next_step_suggestion) {
-      content += `\n💡 ${result.next_step_suggestion}`;
-    }
-    
-    return content;
-  }, [t]);
-  
-  const createWriterWorkflow = useCallback(async (chapterCount: number = 1) => {
-    if (!novelId) {
-      addErrorMessage(t("smart_writer_no_active_novel") || "请先选择一部小说");
-      return null;
-    }
-    
-    setIsBusy(true);
-    
-    addAssistantMessage(
-      chapterCount > 1 
-        ? formatMessage(t("smart_writer_starting_multiple"), { count: chapterCount })
-        : t("smart_writer_starting_single")
-    );
-    
+
+  const handleSend = useCallback(async () => {
+    const text = input.trim();
+    if (!text || isLoading || !novelId) return;
+
+    setInput("");
+    setIsLoading(true);
+    setPendingQuestion(null);
+    setAgentSteps([]);
+
+    setMessages((prev) => [...prev, { id: generateId(), role: "user", content: text, timestamp: Date.now() }]);
+
     try {
-      const payload: CreateWorkflowRequest = {
-        initial_phase: "chapter_summary",
-        target_chapter_count: chapterCount,
-      };
-      
-      const result = await createWorkflow(novelId, payload);
-      
-      setWriterState((prev) => ({
-        ...prev,
-        workflowId: result.workflow_id,
-        progress: result.progress,
-        targetChapterCount: chapterCount,
-        completedChapterCount: 0,
-        currentChapter: null,
-        isWaiting: false,
-      }));
-      
-      setStoredSession(novelId, result.workflow_id);
-      
-      return result;
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      addErrorMessage(`${t("workflow_create_failed")}: ${err.message}`);
-      return null;
-    } finally {
-      setIsBusy(false);
+      const cur = await ensureSession();
+      const aid = generateId();
+      setMessages((prev) => [...prev, { id: aid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true }]);
+
+      await agentChat(novelId, cur.session_id, text, {
+        onPatch: (data) => {
+          if (data.message?.role === "assistant") {
+            setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: data.message?.content || "", isStreaming: data.message?.is_streaming } : m));
+          }
+        },
+        onDelta: (data) => {
+          if (data.type === "text" && data.content) {
+            setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: m.content + data.content } : m));
+          }
+        },
+        onAgentStep: (data) => { setAgentSteps((prev) => [...prev, data]); },
+        onQuestion: (data) => { setPendingQuestion(data); },
+        onStatus: (data) => { setStatus(data.status || "idle"); },
+        onDone: () => { setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, isStreaming: false } : m)); setIsLoading(false); },
+        onError: (data) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },
+      });
+    } catch (err) {
+      setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
+      setIsLoading(false);
     }
-  }, [novelId, addAssistantMessage, addErrorMessage, t]);
-  
-  const executeCurrentPhase = useCallback(async (workflowId: string, modifications?: Record<string, unknown>) => {
-    if (!novelId) return null;
-    
-    setIsBusy(true);
-    
+  }, [input, isLoading, novelId, ensureSession]);
+
+  const handleAnswerQuestion = useCallback(async (questionId: string, answer: string, selectedOption?: string) => {
+    if (!session || !pendingQuestion) return;
+    setPendingQuestion(null);
+    setIsLoading(true);
+    setAgentSteps([]);
+    const answerText = selectedOption || answer;
+    setMessages((prev) => [...prev, { id: generateId(), role: "user", content: answerText, timestamp: Date.now() }]);
+
     try {
-      const initialProgress = await fetchWorkflowProgress(novelId, workflowId);
-      const currentPhase = initialProgress.current_phase;
-      
-      const generatingMessage = currentPhase === "chapter_summary" 
-        ? t("workflow_generating_summary")
-        : t("workflow_generating_content");
-      
-      const assistantMsgId = addAssistantMessage(generatingMessage);
-      
-      if (currentPhase === "chapter_summary") {
-        const result = await executePhase(novelId, workflowId, {
-          user_modifications: modifications,
-        });
-        
-        if (!result.success) {
-          updateMessage(assistantMsgId, {
-            content: `${t("workflow_execute_failed")}: ${result.error_message || t("common_unknown_error")}`,
-            role: "error",
-          });
-          return null;
-        }
-        
-        const progress = result.progress;
-        
-        setWriterState((prev) => ({
-          ...prev,
-          progress,
-          isWaiting: progress.status === "waiting_user_confirm",
-        }));
-        
-        updateMessage(assistantMsgId, { 
-          content: t("workflow_generation_completed"),
-          isEditable: progress.current_result && progress.current_result.editable_fields.length > 0,
-          editableContent: progress.current_result 
-            ? Object.fromEntries(
-                progress.current_result.editable_fields.map((f) => [
-                  f,
-                  String(progress.current_result?.display_content?.[f] || ""),
-                ])
-              )
-            : undefined,
-        });
-        
-        return progress;
-      } else {
-        let accumulatedText = "";
-        
-        await executePhaseStream(
-          novelId,
-          workflowId,
-          modifications,
-          {
-            onToken: (chunk: string) => {
-              accumulatedText += chunk;
-            }
-          }
-        );
-        
-        const progress = await fetchWorkflowProgress(novelId, workflowId);
-        
-        setWriterState((prev) => ({
-          ...prev,
-          progress,
-          isWaiting: progress.status === "waiting_user_confirm",
-        }));
-        
-        if (currentPhase === "chapter_content" && progress.current_result) {
-          const title = (progress.current_result.display_content?.title as string) || "";
-          const chapterNum = progress.target_chapter ?? (writerState.completedChapterCount + 1);
-          
-          const locationMessage = formatMessage(
-            t("smart_writer_content_generated_location"),
-            { chapterNum: chapterNum, title: title || t("workflow_field_untitled") }
-          );
-          
-          const displayContent = progress.current_result.display_content || {};
-          updateMessage(assistantMsgId, { 
-            content: locationMessage,
-            isEditable: progress.current_result.editable_fields.length > 0,
-            editableContent: Object.fromEntries(
-              progress.current_result.editable_fields.map((f) => [
-                f,
-                String(displayContent[f] || ""),
-              ])
-            ),
-          });
-        } else if (progress.current_result) {
-          const displayContent = progress.current_result.display_content || {};
-          updateMessage(assistantMsgId, { 
-            content: t("workflow_generation_completed"),
-            isEditable: progress.current_result.editable_fields.length > 0,
-            editableContent: Object.fromEntries(
-              progress.current_result.editable_fields.map((f) => [
-                f,
-                String(displayContent[f] || ""),
-              ])
-            ),
-          });
-        }
-        
-        return progress;
-      }
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      addErrorMessage(`${t("workflow_execute_failed")}: ${err.message}`);
-      return null;
-    } finally {
-      setIsBusy(false);
-      setIsStreaming(false);
-    }
-  }, [novelId, addAssistantMessage, addErrorMessage, updateMessage, writerState.completedChapterCount, t]);
-  
-  const confirmAndProceed = useCallback(async (workflowId: string, modifications?: Record<string, unknown>) => {
-    if (!novelId) return { shouldContinue: false };
-    
-    setIsBusy(true);
-    
-    try {
-      const result = await confirmPhase(novelId, workflowId, {
-        user_modifications: modifications,
+      const aid = generateId();
+      setMessages((prev) => [...prev, { id: aid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true }]);
+      await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption, {
+        onDelta: (data) => { if (data.type === "text" && data.content) setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: m.content + data.content } : m)); },
+        onAgentStep: (data) => { setAgentSteps((prev) => [...prev, data]); },
+        onQuestion: (data) => { setPendingQuestion(data); },
+        onStatus: (data) => { setStatus(data.status || "idle"); },
+        onDone: () => { setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, isStreaming: false } : m)); setIsLoading(false); },
+        onError: (data) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },
       });
-      
-      setWriterState((prev) => ({
-        ...prev,
-        progress: result.progress,
-        isWaiting: result.progress.status === "waiting_user_confirm",
-      }));
-      
-      if (result.success) {
-        if (result.next_phase) {
-          addSystemMessage(t("smart_writer_confirmed_next"));
-          return { shouldContinue: true, nextPhase: result.next_phase };
-        } else {
-          addSystemMessage(t("smart_writer_chapter_complete"));
-          return { shouldContinue: false, isComplete: true };
-        }
-      }
-      
-      return { shouldContinue: false };
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      addErrorMessage(`${t("workflow_confirm_failed")}: ${err.message}`);
-      return { shouldContinue: false };
-    } finally {
-      setIsBusy(false);
+    } catch (err) {
+      setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
+      setIsLoading(false);
     }
-  }, [novelId, addSystemMessage, addErrorMessage, t]);
-  
-  const handleSaveChapter = useCallback(async () => {
-    if (!writerState.workflowId || !novelId) return;
-    
-    setIsBusy(true);
-    try {
-      const modifications = Object.keys(editFields).length > 0 ? editFields : undefined;
-      const result = await saveWorkflowChapter(novelId, writerState.workflowId!, {
-        user_modifications: modifications,
-      });
-      if (result.success && result.chapter) {
-        addSystemMessage(t("workflow_save_success"));
-        onChapterSaved?.(result.chapter);
-        window.dispatchEvent(new CustomEvent("inkmind:chapter-saved", { detail: result.chapter }));
-        
-        const newTitle = result.chapter.title;
-        const newCompletedCount = writerState.completedChapterCount + 1;
-        
-        setSavedChapterTitles((prev) => [...prev, newTitle]);
-        
-        if (newCompletedCount < writerState.targetChapterCount) {
-          setWriterState((prev) => ({
-            ...prev,
-            completedChapterCount: newCompletedCount,
-            currentChapter: null,
-            isWaiting: true,
-            progress: {
-              ...prev.progress!,
-              current_phase: "chapter_saved" as WorkflowPhaseType,
-              status: "waiting_user_confirm",
-            },
-          }));
-          addAssistantMessage(
-            formatMessage(t("smart_writer_continue_next_chapter") || "继续写下一章吗？", {
-              done: newCompletedCount,
-              total: writerState.targetChapterCount,
-            })
-          );
-        } else {
-          const allTitles = [...savedChapterTitles, newTitle];
-          const summaryLines = allTitles.map((ttl, i) => `第${i + 1}章：${ttl}`).join("\n");
-          addAssistantMessage(
-            `✅ ${formatMessage(t("smart_writer_all_complete_summary") || "全部完成！共生成 {count} 章", { count: allTitles.length })}\n\n${summaryLines}`
-          );
-          setStoredSession(novelId, null);
-          setWriterState({
-            workflowId: null,
-            progress: null,
-            targetChapterCount: 0,
-            completedChapterCount: 0,
-            currentChapter: null,
-            isWaiting: false,
-          });
-          setEditFields({});
-          setSavedChapterTitles([]);
-        }
-      } else {
-        addErrorMessage(t("workflow_save_failed") || "保存失败");
-      }
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      addErrorMessage(`${t("common_error")}: ${err.message}`);
-    } finally {
-      setIsBusy(false);
-    }
-  }, [writerState.workflowId, writerState.completedChapterCount, writerState.targetChapterCount, novelId, editFields, addSystemMessage, addAssistantMessage, addErrorMessage, onChapterSaved, savedChapterTitles, t]);
-  
-  const handleProceedToNextPhase = useCallback(async () => {
-    if (!writerState.workflowId || !novelId) return;
-    
-    const modifications = Object.keys(editFields).length > 0 ? editFields : undefined;
-    
-    if (writerState.progress?.current_phase === "chapter_saved") {
-      addSystemMessage(t("smart_writer_confirmed_next"));
-      setEditFields({});
-      await executeCurrentPhase(writerState.workflowId);
-    } else if (writerState.progress?.current_phase === "chapter_content" || 
-        writerState.progress?.current_phase === "polish") {
-      addSystemMessage(t("smart_writer_confirm_save"));
-      await handleSaveChapter();
-    } else {
-      const { shouldContinue, nextPhase } = await confirmAndProceed(
-        writerState.workflowId, 
-        modifications
-      );
-      
-      if (shouldContinue && nextPhase) {
-        setEditFields({});
-        await executeCurrentPhase(writerState.workflowId);
-      }
-    }
-  }, [writerState.workflowId, writerState.progress, novelId, editFields, addSystemMessage, confirmAndProceed, handleSaveChapter, executeCurrentPhase, t]);
-  
-  const handleReexecutePhase = useCallback(async () => {
-    if (!writerState.workflowId || !novelId) return;
-    
-    setEditFields({});
-    
-    addSystemMessage(t("smart_writer_reexecuting_phase"));
-    
-    const progress = await executeCurrentPhase(writerState.workflowId);
-    if (progress && progress.status === "waiting_user_confirm") {
-      addSystemMessage(t("smart_writer_check_and_confirm"));
-    }
-  }, [writerState.workflowId, novelId, addSystemMessage, executeCurrentPhase, t]);
-  
-  const handleCancelSession = useCallback(() => {
-    if (writerState.workflowId) {
-      setStoredSession(novelId, null);
-      setWriterState({
-        workflowId: null,
-        progress: null,
-        targetChapterCount: 0,
-        completedChapterCount: 0,
-        currentChapter: null,
-        isWaiting: false,
-      });
-      setEditFields({});
-      addSystemMessage(t("smart_writer_session_cancelled"));
-    }
-  }, [writerState.workflowId, novelId, addSystemMessage]);
-  
-  const handleSendMessage = useCallback(async () => {
-    const text = inputValue.trim();
-    if (!text || isBusy) return;
-    
-    setInputValue("");
-    addMessage("user", text);
-    
-    const { type, params } = parseInstruction(text);
-    
-    switch (type) {
-      case "generate_multiple":
-      case "generate_one": {
-        const count = (params.count as number) || 1;
-        
-        if (writerState.workflowId && writerState.isWaiting) {
-          addSystemMessage(t("smart_writer_existing_session"));
-          return;
-        }
-        
-        if (writerState.workflowId) {
-          addSystemMessage(t("smart_writer_cancel_prev"));
-        }
-        
-        const result = await createWriterWorkflow(count);
-        
-        if (result?.workflow_id) {
-          const progress = await executeCurrentPhase(result.workflow_id);
-          if (progress && progress.status === "waiting_user_confirm") {
-            addSystemMessage(t("smart_writer_check_and_confirm"));
-          }
-        }
-        break;
-      }
-      
-      case "confirm": {
-        if (!writerState.workflowId) {
-          addErrorMessage(t("smart_writer_no_active_session"));
-          return;
-        }
-        
-        if (writerState.progress?.status === "waiting_user_confirm") {
-          const modifications = Object.keys(editFields).length > 0 ? editFields : undefined;
-          
-          if (writerState.progress.current_phase === "chapter_content" || 
-              writerState.progress.current_phase === "polish") {
-            addSystemMessage(t("smart_writer_confirm_save"));
-          } else {
-            const { shouldContinue, nextPhase } = await confirmAndProceed(
-              writerState.workflowId, 
-              modifications
-            );
-            
-            if (shouldContinue && nextPhase) {
-              setEditFields({});
-              await executeCurrentPhase(writerState.workflowId);
-            }
-          }
-        } else {
-          addErrorMessage(t("smart_writer_nothing_to_confirm"));
-        }
-        break;
-      }
-      
-      case "save": {
-        if (!writerState.workflowId) {
-          addErrorMessage(t("smart_writer_no_active_session"));
-          return;
-        }
-        await handleSaveChapter();
-        break;
-      }
-      
-      case "cancel": {
-        if (writerState.workflowId) {
-          setStoredSession(novelId, null);
-          setWriterState({
-            workflowId: null,
-            progress: null,
-            targetChapterCount: 0,
-            completedChapterCount: 0,
-            currentChapter: null,
-            isWaiting: false,
-          });
-          setEditFields({});
-          addSystemMessage(t("smart_writer_session_cancelled"));
-        } else {
-          addSystemMessage(t("smart_writer_no_active_session"));
-        }
-        break;
-      }
-      
-      case "question":
-      default: {
-        if (!novelId) {
-          addAssistantMessage(t("smart_writer_help_text"));
-          break;
-        }
-        setIsBusy(true);
-        setIsStreaming(true);
-        const chatMsgId = addAssistantMessage("", { isStreaming: true });
-        let chatAcc = "";
-        try {
-          const chatHistory = messages
-            .filter((m) => m.role === "user" || m.role === "assistant")
-            .slice(-10)
-            .map((m) => ({ role: m.role, content: m.content }));
-          await novelAiChat(
-            novelId,
-            { message: text, history: chatHistory },
-            (chunk) => {
-              chatAcc += chunk;
-              updateMessage(chatMsgId, { content: chatAcc });
-            }
-          );
-        } catch (error) {
-          const err = error instanceof Error ? error : new Error(String(error));
-          if (!chatAcc) {
-            updateMessage(chatMsgId, {
-              role: "error",
-              content: `${t("common_error")}: ${err.message}`,
-              isStreaming: false,
-            });
-          }
-        } finally {
-          updateMessage(chatMsgId, { isStreaming: false });
-          setIsBusy(false);
-          setIsStreaming(false);
-        }
-        break;
-      }
-    }
-  }, [
-    inputValue, 
-    isBusy, 
-    addMessage, 
-    addSystemMessage, 
-    addAssistantMessage, 
-    addErrorMessage,
-    updateMessage,
-    messages,
-    writerState,
-    editFields,
-    createWriterWorkflow,
-    executeCurrentPhase,
-    confirmAndProceed,
-    handleSaveChapter,
-    novelId,
-    t,
-  ]);
-  
-  const handleOtherOptionSubmit = useCallback(async () => {
-    if (!otherOptionInput.trim()) return;
-    
-    const userInput = otherOptionInput.trim();
-    setOtherOptionInput("");
-    
-    setInputValue(userInput);
-    
-    const text = userInput.trim();
-    if (!text || isBusy) return;
-    
-    setInputValue("");
-    addMessage("user", text);
-    
-    const { type, params } = parseInstruction(text);
-    
-    switch (type) {
-      case "generate_multiple":
-      case "generate_one": {
-        const count = (params.count as number) || 1;
-        
-        if (writerState.workflowId && writerState.isWaiting) {
-          addSystemMessage(t("smart_writer_existing_session"));
-          return;
-        }
-        
-        if (writerState.workflowId) {
-          addSystemMessage(t("smart_writer_cancel_prev"));
-        }
-        
-        const result = await createWriterWorkflow(count);
-        if (result) {
-          const progress = await executeCurrentPhase(result.workflow_id);
-          if (progress && progress.status === "waiting_user_confirm") {
-            addSystemMessage(t("smart_writer_check_and_confirm"));
-          }
-        }
-        break;
-      }
-      
-      case "confirm": {
-        if (!writerState.workflowId) {
-          addErrorMessage(t("smart_writer_no_active_session"));
-          return;
-        }
-        
-        const modifications = Object.keys(editFields).length > 0 ? editFields : undefined;
-        
-        if (writerState.progress?.current_phase === "chapter_content" || 
-            writerState.progress?.current_phase === "polish") {
-          addSystemMessage(t("smart_writer_confirm_save"));
-          await handleSaveChapter();
-        } else {
-          const { shouldContinue, nextPhase } = await confirmAndProceed(
-            writerState.workflowId, 
-            modifications
-          );
-          
-          if (shouldContinue && nextPhase) {
-            setEditFields({});
-            await executeCurrentPhase(writerState.workflowId);
-          }
-        }
-        break;
-      }
-      
-      case "save": {
-        if (!writerState.workflowId) {
-          addErrorMessage(t("smart_writer_no_active_session"));
-          return;
-        }
-        await handleSaveChapter();
-        break;
-      }
-      
-      case "cancel": {
-        if (writerState.workflowId) {
-          setStoredSession(novelId, null);
-          setWriterState({
-            workflowId: null,
-            progress: null,
-            targetChapterCount: 0,
-            completedChapterCount: 0,
-            currentChapter: null,
-            isWaiting: false,
-          });
-          setEditFields({});
-          addSystemMessage(t("smart_writer_session_cancelled"));
-        } else {
-          addSystemMessage(t("smart_writer_no_active_session"));
-        }
-        break;
-      }
-      
-      case "question":
-      default: {
-        if (!novelId) {
-          addAssistantMessage(t("smart_writer_help_text"));
-          break;
-        }
-        setIsBusy(true);
-        setIsStreaming(true);
-        const chatMsgId = addAssistantMessage("", { isStreaming: true });
-        let chatAcc = "";
-        try {
-          const chatHistory = messages
-            .filter((m) => m.role === "user" || m.role === "assistant")
-            .slice(-10)
-            .map((m) => ({ role: m.role, content: m.content }));
-          await novelAiChat(
-            novelId,
-            { message: text, history: chatHistory },
-            (chunk) => {
-              chatAcc += chunk;
-              updateMessage(chatMsgId, { content: chatAcc });
-            }
-          );
-        } catch (error) {
-          const err = error instanceof Error ? error : new Error(String(error));
-          if (!chatAcc) {
-            updateMessage(chatMsgId, {
-              role: "error",
-              content: `${t("common_error")}: ${err.message}`,
-              isStreaming: false,
-            });
-          }
-        } finally {
-          updateMessage(chatMsgId, { isStreaming: false });
-          setIsBusy(false);
-          setIsStreaming(false);
-        }
-        break;
-      }
-    }
-  }, [
-    otherOptionInput,
-    inputValue,
-    isBusy,
-    addMessage,
-    addSystemMessage,
-    addAssistantMessage,
-    addErrorMessage,
-    updateMessage,
-    messages,
-    writerState,
-    editFields,
-    createWriterWorkflow,
-    executeCurrentPhase,
-    confirmAndProceed,
-    handleSaveChapter,
-    novelId,
-    t,
-  ]);
-  
-  const handleEditFieldChange = useCallback((field: string, value: string) => {
-    setEditFields((prev) => ({ ...prev, [field]: value }));
-  }, []);
-  
-  useEffect(() => {
-    if (!isOpen) return;
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-    
-    const stored = getStoredSession(novelId);
-    if (stored?.workflowId && novelId) {
-      setWriterState((prev) => ({ ...prev, workflowId: stored.workflowId }));
-      addSystemMessage(t("smart_writer_restore_session"));
-      
-      fetchWorkflowProgress(novelId, stored.workflowId).then((progress) => {
-        setWriterState((prev) => ({
-          ...prev,
-          progress,
-          isWaiting: progress.status === "waiting_user_confirm",
-        }));
-        
-        if (progress.current_result) {
-          const resultMsg = formatPhaseResult(progress.current_result, progress.current_phase);
-          const displayContent = progress.current_result.display_content || {};
-          addAssistantMessage(resultMsg, {
-            isEditable: progress.current_result.editable_fields.length > 0,
-            editableContent: Object.fromEntries(
-              progress.current_result.editable_fields.map((f) => [
-                f,
-                String(displayContent[f] || ""),
-              ])
-            ),
-          });
-          addSystemMessage(t("smart_writer_check_and_confirm"));
-        }
-      }).catch(() => {
-        setStoredSession(novelId, null);
-        setWriterState((prev) => ({ ...prev, workflowId: null }));
-      });
-    } else {
-      addAssistantMessage(t("smart_writer_welcome"));
-    }
-  }, [novelId, addSystemMessage, addAssistantMessage, formatPhaseResult, isOpen, t]);
-  
-  const getMessageStyle = (role: MessageRole): string => {
-    switch (role) {
-      case "user":
-        return "ai-assistant-bubble--user";
-      case "assistant":
-        return "ai-assistant-bubble--assistant";
-      case "system":
-        return "ai-assistant-bubble--system";
-      case "error":
-        return "ai-assistant-bubble--error";
-      default:
-        return "";
-    }
+  }, [session, pendingQuestion, novelId]);
+
+  const getToolDisplayName = (name: string) => {
+    const key = TOOL_DISPLAY_NAMES[name];
+    return key ? t(key) : name;
   };
-  
+
+  const displaySteps = agentSteps.map((s) => ({ ...s, tool_name: s.tool_name ? getToolDisplayName(s.tool_name) : s.tool_name }));
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  }, [handleSend]);
+
   return (
     <>
       {!isOpen && (
         <button
           type="button"
           className="ai-assistant-float-btn"
-          style={{
-            right: `${Math.abs(position.x)}px`,
-            top: `${position.y}px`,
-            transform: isDragging ? "scale(1.1)" : undefined,
-          }}
+          style={{ right: `${Math.abs(position.x)}px`, top: `${position.y}px`, transform: isDragging ? "scale(1.1)" : undefined }}
           onClick={() => setIsOpen(true)}
           onMouseDown={handleDragStart}
           onTouchStart={handleDragStart}
         >
-          <AiIcon size={60} />
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
         </button>
       )}
-      
+
       {isOpen && (
-        <div 
+        <div
           className="ai-assistant-panel"
-          style={{
-            right: `${Math.abs(position.x)}px`,
-            top: `${position.y}px`,
-            width: `${panelSize.width}px`,
-            height: `${panelSize.height}px`,
-            maxHeight: 'calc(100vh - 88px)',
-          }}
+          style={{ right: `${Math.abs(position.x)}px`, top: `${position.y}px`, width: `${panelSize.width}px`, height: `${panelSize.height}px`, maxHeight: "calc(100vh - 88px)" }}
         >
-          <div 
-            className="ai-assistant-header"
-            onMouseDown={handleDragStart}
-            onTouchStart={handleDragStart}
-            style={{ cursor: "grab" }}
-          >
+          <div className="ai-assistant-header" onMouseDown={handleDragStart} onTouchStart={handleDragStart} style={{ cursor: "grab" }}>
             <div className="ai-assistant-header__title">
-              <AiIcon size={24} />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
               <span>{t("smart_writer_title")}</span>
+              {status === "running" && <span className="ai-assistant-header__status-dot" />}
             </div>
-            {writerState.targetChapterCount > 0 && (
-              <div className="ai-assistant-header__status">
-                {formatMessage(t("smart_writer_progress"), {
-                  done: writerState.completedChapterCount,
-                  total: writerState.targetChapterCount,
-                })}
+            <button type="button" className="ai-assistant-header__close" onClick={() => setIsOpen(false)}>×</button>
+          </div>
+
+          {displaySteps.length > 0 && (
+            <div className="agent-steps-container">
+              <AgentStepDisplay steps={displaySteps} />
+            </div>
+          )}
+
+          <div className="agent-messages">
+            {messages.length === 0 && (
+              <div className="agent-welcome">
+                <div className="agent-welcome__icon">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
+                  </svg>
+                </div>
+                <p className="agent-welcome__text">{t("smart_writer_welcome")}</p>
               </div>
             )}
-            <button
-              type="button"
-              className="ai-assistant-header__close"
-              onClick={() => setIsOpen(false)}
-            >
-              ×
-            </button>
-          </div>
-          
-          <div className="ai-assistant-messages">
             {messages.map((msg) => (
-              <div key={msg.id} className={`ai-assistant-bubble ${getMessageStyle(msg.role)}`}>
-                <div className="ai-assistant-bubble__content"><ReactMarkdown>{msg.content}</ReactMarkdown></div>
-                
-                {msg.isEditable && msg.editableContent && !msg.isStreaming && (
-                  <div className="ai-assistant-bubble__editable">
-                    {Object.entries(msg.editableContent).map(([field, value]) => (
-                      <div key={field} className="ai-assistant-edit-field">
-                        <label className="ai-assistant-edit-field__label">
-                          {t(`workflow_field_${field}`) || field}
-                        </label>
-                        {field === "body" || field === "chapter_summary" ? (
-                          <textarea
-                            className="ai-assistant-edit-field__textarea"
-                            value={editFields[field] ?? value}
-                            onChange={(e) => handleEditFieldChange(field, e.target.value)}
-                            rows={4}
-                            disabled={isBusy}
-                          />
-                        ) : (
-                          <input
-                            type="text"
-                            className="ai-assistant-edit-field__input"
-                            value={editFields[field] ?? value}
-                            onChange={(e) => handleEditFieldChange(field, e.target.value)}
-                            disabled={isBusy}
-                          />
-                        )}
-                      </div>
-                    ))}
+              <div key={msg.id} className={`agent-message agent-message-${msg.role}`}>
+                {msg.role === "user" ? (
+                  <div className="agent-message-content">{msg.content}</div>
+                ) : msg.role === "error" ? (
+                  <div className="agent-message-content agent-message-error">{msg.content}</div>
+                ) : (
+                  <div className="agent-message-content">
+                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    {msg.isStreaming && <span className="agent-cursor">▊</span>}
                   </div>
                 )}
               </div>
             ))}
             <div ref={messagesEndRef} />
           </div>
-          
-          {writerState.isWaiting && (
-            <div className="ai-assistant-actions">
-              <div className="ai-assistant-action-buttons">
-                <button
-                  type="button"
-                  className="ai-assistant-action-btn ai-assistant-action-btn--primary"
-                  onClick={handleProceedToNextPhase}
-                  disabled={isBusy}
-                >
-                  {writerState.progress?.current_phase === "chapter_saved"
-                    ? t("smart_writer_option_continue_next")
-                    : writerState.progress?.current_phase === "chapter_summary" 
-                    ? t("smart_writer_option_proceed")
-                    : writerState.progress?.current_phase === "chapter_content"
-                    ? t("smart_writer_option_save_chapter")
-                    : t("smart_writer_action_confirm")}
-                </button>
-                
-                {writerState.progress?.current_phase !== "chapter_saved" && (
-                  <button
-                    type="button"
-                    className="ai-assistant-action-btn ai-assistant-action-btn--secondary"
-                    onClick={handleReexecutePhase}
-                    disabled={isBusy}
-                  >
-                    {writerState.progress?.current_phase === "chapter_summary" 
-                      ? t("smart_writer_option_regenerate_summary")
-                      : writerState.progress?.current_phase === "chapter_content"
-                      ? t("smart_writer_option_regenerate_content")
-                      : t("smart_writer_action_regenerate")}
-                  </button>
-                )}
-                
-                <button
-                  type="button"
-                  className="ai-assistant-action-btn ai-assistant-action-btn--ghost"
-                  onClick={handleCancelSession}
-                  disabled={isBusy}
-                >
-                  {t("smart_writer_action_exit")}
-                </button>
-              </div>
-              
-              <div className="ai-assistant-other-option">
-                <input
-                  type="text"
-                  className="ai-assistant-other-option__input"
-                  value={otherOptionInput}
-                  onChange={(e) => setOtherOptionInput(e.target.value)}
-                  placeholder={t("smart_writer_other_placeholder")}
-                  disabled={isBusy}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      void handleOtherOptionSubmit();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="ai-assistant-action-btn ai-assistant-action-btn--secondary ai-assistant-other-option__btn"
-                  onClick={handleOtherOptionSubmit}
-                  disabled={isBusy || !otherOptionInput.trim()}
-                >
-                  {t("smart_writer_action_submit")}
-                </button>
-              </div>
+
+          {pendingQuestion && (
+            <div className="agent-question-container">
+              <AskUserQuestion question={pendingQuestion} onAnswer={handleAnswerQuestion} disabled={isLoading} />
             </div>
           )}
-          
-          <div className="ai-assistant-input">
+
+          <div className="agent-input-container">
             <textarea
               ref={inputRef}
-              className="ai-assistant-input__textarea"
-              value={inputValue}
-              onChange={(e) => {
-                setInputValue(e.target.value);
-                const el = e.target;
-                el.style.height = "auto";
-                el.style.height = Math.min(el.scrollHeight, 120) + "px";
-              }}
-              placeholder={t("smart_writer_placeholder")}
-              disabled={isBusy}
-              rows={1}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void handleSendMessage();
-                }
-              }}
+              className="agent-input"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={t("agent_chat_placeholder")}
+              disabled={isLoading}
+              rows={2}
             />
             <button
-              type="button"
-              className={`ai-assistant-input__send${inputValue.trim() && !isBusy && !isStreaming ? " ai-assistant-input__send--active" : ""}`}
-              onClick={handleSendMessage}
-              disabled={isBusy || isStreaming || !inputValue.trim()}
-              aria-label={t("write_ask_send")}
+              className="agent-send-btn"
+              onClick={handleSend}
+              disabled={isLoading || !input.trim()}
+              aria-label={t("agent_chat_send")}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M12 19V5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M5 12L12 5L19 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
               </svg>
             </button>
           </div>
+
           <div
             className="ai-assistant-panel__resize-handle"
             onMouseDown={handleResizeStart}
             onTouchStart={handleResizeStart}
-            style={{ cursor: isResizing ? 'se-resize' : 'sw-resize' }}
+            style={{ cursor: isResizing ? "se-resize" : "sw-resize" }}
           />
         </div>
       )}

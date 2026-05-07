@@ -7,7 +7,7 @@ from sqlalchemy import inspect, text
 from app.config import settings
 from app.database import Base, engine
 from app.observability.otel_setup import setup_otel
-from app.routers import admin, auth, background_tasks, chapters, characters, memos, meta, novels, usage, workflow
+from app.routers import admin, agent, auth, background_tasks, chapters, characters, memos, meta, novels, usage, workflow
 
 
 def _migrate_sqlite() -> None:
@@ -69,7 +69,11 @@ def _migrate_sqlite() -> None:
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine, checkfirst=True)
     _migrate_sqlite()
+    from app.agent.task_queue import get_task_queue
+    queue = get_task_queue()
+    await queue.start()
     yield
+    await queue.stop()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -92,6 +96,7 @@ app.include_router(usage.router)
 app.include_router(background_tasks.router)
 app.include_router(admin.router)
 app.include_router(workflow.router)
+app.include_router(agent.router)
 
 setup_otel(app)
 

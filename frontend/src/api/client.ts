@@ -878,6 +878,200 @@ export async function executePhase(
   return data;
 }
 
+export type SseEventHandler = {
+  onSnapshot?: (data: import("@/types/sse").SseSnapshotData) => void;
+  onPatch?: (data: import("@/types/sse").SsePatchData) => void;
+  onDelta?: (data: import("@/types/sse").SseDeltaData) => void;
+  onStatus?: (data: import("@/types/sse").SseStatusData) => void;
+  onQuestion?: (data: import("@/types/sse").PendingQuestionData) => void;
+  onAgentStep?: (data: import("@/types/sse").SseAgentStepData) => void;
+  onError?: (data: import("@/types/sse").SseErrorData) => void;
+  onDone?: (data: import("@/types/sse").SseDoneData) => void;
+};
+
+export function connectSse(
+  path: string,
+  body: unknown,
+  handlers: SseEventHandler,
+  options?: { signal?: AbortSignal }
+): Promise<{ close: () => void }> {
+  const token = getToken();
+  const url = `${baseURL}${path.startsWith("/") ? path : `/${path}`}`;
+
+  const controller = new AbortController();
+  const signal = options?.signal;
+
+  if (signal) {
+    signal.addEventListener("abort", () => controller.abort());
+  }
+
+  let resolveReady: (value: { close: () => void }) => void;
+  const ready = new Promise<{ close: () => void }>((r) => { resolveReady = r; });
+
+  const closeObj = { close: () => controller.abort() };
+  resolveReady!(closeObj);
+
+  fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept-Language": getCurrentLanguage(),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        const text = await res.text();
+        handlers.onError?.({ message: text || `HTTP ${res.status}` });
+        return;
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        handlers.onError?.({ message: "无响应流" });
+        return;
+      }
+
+      const dec = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (value) buffer += dec.decode(value, { stream: true });
+        if (done) break;
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentEvent = "";
+        let currentData = "";
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            currentData = line.slice(6);
+          } else if (line === "" && currentEvent && currentData) {
+            try {
+              const parsed = JSON.parse(currentData);
+              switch (currentEvent) {
+                case "snapshot":
+                  handlers.onSnapshot?.(parsed);
+                  break;
+                case "patch":
+                  handlers.onPatch?.(parsed);
+                  break;
+                case "delta":
+                  handlers.onDelta?.(parsed);
+                  break;
+                case "status":
+                  handlers.onStatus?.(parsed);
+                  break;
+                case "question":
+                  handlers.onQuestion?.(parsed);
+                  break;
+                case "agent_step":
+                  handlers.onAgentStep?.(parsed);
+                  break;
+                case "error":
+                  handlers.onError?.(parsed);
+                  break;
+                case "done":
+                  handlers.onDone?.(parsed);
+                  break;
+              }
+            } catch {
+              /* ignore parse errors */
+            }
+            currentEvent = "";
+            currentData = "";
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err.name !== "AbortError") {
+        handlers.onError?.({ message: err.message || "连接失败" });
+      }
+    });
+
+  return ready;
+}
+
+export function executePhaseSse(
+  novelId: number,
+  workflowId: string,
+  payload: ExecutePhaseRequest | undefined,
+  handlers: SseEventHandler,
+  options?: { signal?: AbortSignal }
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const wrappedHandlers: SseEventHandler = {
+      ...handlers,
+      onDone: (data) => {
+        handlers.onDone?.(data);
+        resolve();
+      },
+      onError: (data) => {
+        handlers.onError?.(data);
+        reject(new Error(data.message));
+      },
+    };
+
+    connectSse(
+      `/novels/${novelId}/workflow/${workflowId}/execute-sse`,
+      payload || {},
+      wrappedHandlers,
+      options
+    ).catch(reject);
+  });
+}
+
+export function generateChapterSse(
+  novelId: number,
+  summary: string,
+  handlers: SseEventHandler,
+  options?: {
+    chapterId?: number | null;
+    title?: string | null;
+    lockTitle?: boolean;
+    wordCount?: number | null;
+    signal?: AbortSignal;
+  }
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const wrappedHandlers: SseEventHandler = {
+      ...handlers,
+      onDone: (data) => {
+        handlers.onDone?.(data);
+        resolve();
+      },
+      onError: (data) => {
+        handlers.onError?.(data);
+        reject(new Error(data.message));
+      },
+    };
+
+    connectSse(
+      `/novels/${novelId}/chapters/generate-sse`,
+      {
+        summary,
+        chapter_id: options?.chapterId ?? null,
+        title: options?.title?.trim() ? options.title.trim() : null,
+        lock_title: options?.lockTitle ?? false,
+        word_count:
+          options?.wordCount && options.wordCount >= 500 && options.wordCount <= 4000
+            ? options.wordCount
+            : null,
+      },
+      wrappedHandlers,
+      { signal: options?.signal }
+    ).catch(reject);
+  });
+}
+
 export async function executePhaseStream(
   novelId: number,
   workflowId: string,
@@ -915,6 +1109,99 @@ export async function saveWorkflowChapter(
   const { data } = await api.post<SaveChapterResponse>(
     `/novels/${novelId}/workflow/${workflowId}/save-chapter`,
     payload || {}
+  );
+  return data;
+}
+
+export type AgentSession = {
+  session_id: string;
+  novel_id: number;
+  status: string;
+  orchestrator?: string;
+  provider?: string;
+};
+
+export type AgentTaskStatus = {
+  task_id: string;
+  task_type: string;
+  status: string;
+  progress: number;
+  progress_message?: string;
+  result?: Record<string, unknown>;
+  error?: string;
+};
+
+export async function createAgentSession(novelId: number): Promise<AgentSession> {
+  const { data } = await api.post<AgentSession>(
+    `/novels/${novelId}/agent/sessions`,
+    {}
+  );
+  return data;
+}
+
+export function agentChat(
+  novelId: number,
+  sessionId: string,
+  message: string,
+  handlers: SseEventHandler,
+  options?: { signal?: AbortSignal }
+): Promise<{ close: () => void }> {
+  return connectSse(
+    `/novels/${novelId}/agent/chat`,
+    { session_id: sessionId, message },
+    handlers,
+    options
+  );
+}
+
+export function agentAnswerQuestion(
+  novelId: number,
+  sessionId: string,
+  questionId: string,
+  answer: string,
+  selectedOption?: string,
+  handlers?: SseEventHandler,
+  options?: { signal?: AbortSignal }
+): Promise<{ close: () => void }> {
+  return connectSse(
+    `/novels/${novelId}/agent/answer-question`,
+    {
+      session_id: sessionId,
+      question_id: questionId,
+      answer,
+      selected_option: selectedOption ?? null,
+    },
+    handlers || {},
+    options
+  );
+}
+
+export async function getAgentSession(
+  novelId: number,
+  sessionId: string
+): Promise<Record<string, unknown>> {
+  const { data } = await api.get(
+    `/novels/${novelId}/agent/sessions/${sessionId}`
+  );
+  return data;
+}
+
+export async function getAgentTaskStatus(
+  novelId: number,
+  taskId: string
+): Promise<AgentTaskStatus> {
+  const { data } = await api.get<AgentTaskStatus>(
+    `/novels/${novelId}/agent/tasks/${taskId}`
+  );
+  return data;
+}
+
+export async function cancelAgentTask(
+  novelId: number,
+  taskId: string
+): Promise<{ success: boolean }> {
+  const { data } = await api.post<{ success: boolean }>(
+    `/novels/${novelId}/agent/tasks/${taskId}/cancel`
   );
   return data;
 }
