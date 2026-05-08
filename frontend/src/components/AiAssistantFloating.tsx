@@ -75,6 +75,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const initializedRef = useRef(false);
+  const activeAssistantIdRef = useRef<string>("");
 
   const [position, setPosition] = useState(() => loadJson(POSITION_KEY, DEFAULT_POSITION));
   const [panelSize, setPanelSize] = useState(() => loadJson(PANEL_SIZE_KEY, DEFAULT_PANEL_SIZE));
@@ -192,47 +193,53 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
   }, [isResizing, panelSize, position]);
 
-  const buildChatHandlers = useCallback((aid: string) => ({
-    onPatch: (data: any) => {
-      if (data.message?.role === "assistant") {
-        setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: data.message?.content || "", isStreaming: data.message?.is_streaming } : m));
-      }
-    },
-    onDelta: (data: any) => {
-      if (data.type === "text" && data.content) {
-        setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, content: m.content + data.content } : m));
-      }
-    },
-    onAgentStep: (data: any) => {
-      console.log("[AgentStep]", data.step_type, data.tool_name);
-      setAgentSteps((prev) => [...prev, data]);
-    },
-    onQuestion: (data: any) => {
-      console.log("[Question]", data.question, data.options);
-      setPendingQuestion(data);
-    },
-    onChapterSaved: (data: any) => {
-      console.log("[ChapterSaved]", data.id, data.title);
-      window.dispatchEvent(new CustomEvent("inkmind:chapter-saved", { detail: data }));
-    },
-    onChapterDeleted: (data: any) => {
-      console.log("[ChapterDeleted]", data.id, data.title);
-      window.dispatchEvent(new CustomEvent("inkmind:chapter-deleted", { detail: data }));
-    },
-    onStatus: (data: any) => {
-      const s = data.status || "idle";
-      setStatus(s);
-      if (s === "waiting_for_user") {
+  const buildChatHandlers = useCallback((aid: string) => {
+    activeAssistantIdRef.current = aid;
+    return {
+      onPatch: (data: any) => {
+        if (data.message?.role === "assistant") {
+          const currentAid = activeAssistantIdRef.current;
+          setMessages((prev) => prev.map((m) => m.id === currentAid ? { ...m, content: data.message?.content || "", isStreaming: data.message?.is_streaming } : m));
+        }
+      },
+      onDelta: (data: any) => {
+        if (data.type === "text" && data.content) {
+          const currentAid = activeAssistantIdRef.current;
+          setMessages((prev) => prev.map((m) => m.id === currentAid ? { ...m, content: m.content + data.content } : m));
+        }
+      },
+      onAgentStep: (data: any) => {
+        console.log("[AgentStep]", data.step_type, data.tool_name);
+        setAgentSteps((prev) => [...prev, data]);
+      },
+      onQuestion: (data: any) => {
+        console.log("[Question]", data.question, data.options);
+        setPendingQuestion(data);
+      },
+      onChapterSaved: (data: any) => {
+        console.log("[ChapterSaved]", data.id, data.title);
+        window.dispatchEvent(new CustomEvent("inkmind:chapter-saved", { detail: data }));
+      },
+      onChapterDeleted: (data: any) => {
+        console.log("[ChapterDeleted]", data.id, data.title);
+        window.dispatchEvent(new CustomEvent("inkmind:chapter-deleted", { detail: data }));
+      },
+      onStatus: (data: any) => {
+        const s = data.status || "idle";
+        setStatus(s);
+        if (s === "waiting_for_user") {
+          setIsLoading(false);
+        }
+      },
+      onDone: () => {
+        const currentAid = activeAssistantIdRef.current;
+        setMessages((prev) => prev.map((m) => m.id === currentAid ? { ...m, isStreaming: false } : m));
+        setAgentSteps((prev) => [...prev, { step_type: "finish" as const, is_parallel: false, ts: Date.now() }]);
         setIsLoading(false);
-      }
-    },
-    onDone: () => {
-      setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, isStreaming: false } : m));
-      setAgentSteps((prev) => [...prev, { step_type: "finish" as const, is_parallel: false, ts: Date.now() }]);
-      setIsLoading(false);
-    },
-    onError: (data: any) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },
-  }), []);
+      },
+      onError: (data: any) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },
+    };
+  }, []);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -284,6 +291,10 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setIsLoading(true);
     const answerText = selectedOption || answer;
     setMessages((prev) => [...prev, { id: generateId(), role: "user", content: answerText, timestamp: Date.now() }]);
+
+    const newAid = generateId();
+    activeAssistantIdRef.current = newAid;
+    setMessages((prev) => [...prev, { id: newAid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true }]);
 
     try {
       await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption);

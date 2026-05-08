@@ -495,21 +495,23 @@ export default function NovelWrite() {
         try {
           await flushSave();
         } catch { /* ignore */ }
-        const full = await loadChapters();
-        const target = full.find((c) => c.id === detail.id);
-        if (target) {
-          setActiveId(target.id);
-          lastLoadedChapterIdRef.current = null;
-          setTitle(target.title);
-          setSummary(target.summary || "");
-          setContent(normalizeBodyParagraphIndent(target.content || ""));
+        try {
+          const full = await loadChapters();
+          const target = full.find((c) => c.id === detail.id);
+          if (target) {
+            setActiveId(target.id);
+            lastLoadedChapterIdRef.current = null;
+            setTitle(target.title);
+            setSummary(target.summary || "");
+            setContent(normalizeBodyParagraphIndent(target.content || ""));
+          }
           setChapters(full);
-        }
+        } catch { /* ignore */ }
       }
     };
     window.addEventListener("inkmind:chapter-saved", handler);
     return () => window.removeEventListener("inkmind:chapter-saved", handler);
-  }, [loadChapters, flushSave]);
+  }, [loadChapters]);
 
   useEffect(() => {
     const handler = async (e: Event) => {
@@ -518,31 +520,33 @@ export default function NovelWrite() {
         try {
           await flushSave();
         } catch { /* ignore */ }
-        const full = await loadChapters();
-        const deletedId = detail.id;
-        if (activeId === deletedId) {
-          const remaining = full.filter((c) => c.id !== deletedId);
-          if (remaining.length > 0) {
-            const next = remaining[0];
-            setActiveId(next.id);
-            lastLoadedChapterIdRef.current = null;
-            setTitle(next.title);
-            setSummary(next.summary || "");
-            setContent(normalizeBodyParagraphIndent(next.content || ""));
-          } else {
-            setActiveId(null);
-            lastLoadedChapterIdRef.current = null;
-            setTitle("");
-            setSummary("");
-            setContent("");
+        try {
+          const full = await loadChapters();
+          const deletedId = detail.id;
+          if (activeId === deletedId) {
+            const remaining = full.filter((c) => c.id !== deletedId);
+            if (remaining.length > 0) {
+              const next = remaining[0];
+              setActiveId(next.id);
+              lastLoadedChapterIdRef.current = null;
+              setTitle(next.title);
+              setSummary(next.summary || "");
+              setContent(normalizeBodyParagraphIndent(next.content || ""));
+            } else {
+              setActiveId(null);
+              lastLoadedChapterIdRef.current = null;
+              setTitle("");
+              setSummary("");
+              setContent("");
+            }
           }
-        }
-        setChapters(full);
+          setChapters(full);
+        } catch { /* ignore */ }
       }
     };
     window.addEventListener("inkmind:chapter-deleted", handler);
     return () => window.removeEventListener("inkmind:chapter-deleted", handler);
-  }, [loadChapters, flushSave, activeId]);
+  }, [loadChapters, activeId]);
 
   useEffect(() => {
     setEvaluateResult(null);
