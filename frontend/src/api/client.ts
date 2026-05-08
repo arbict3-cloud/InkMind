@@ -886,6 +886,7 @@ export type SseEventHandler = {
   onQuestion?: (data: import("@/types/sse").PendingQuestionData) => void;
   onAgentStep?: (data: import("@/types/sse").SseAgentStepData) => void;
   onChapterSaved?: (data: import("@/types/sse").SseChapterSavedData) => void;
+  onChapterDeleted?: (data: import("@/types/sse").SseChapterDeletedData) => void;
   onError?: (data: import("@/types/sse").SseErrorData) => void;
   onDone?: (data: import("@/types/sse").SseDoneData) => void;
 };
@@ -970,6 +971,9 @@ export function connectSse(
                   break;
                 case "chapter_saved":
                   handlers.onChapterSaved?.(parsed);
+                  break;
+                case "chapter_deleted":
+                  handlers.onChapterDeleted?.(parsed);
                   break;
                 case "error":
                   handlers.onError?.(parsed);
@@ -1170,26 +1174,19 @@ export function agentChat(
   );
 }
 
-export function agentAnswerQuestion(
+export async function agentAnswerQuestion(
   novelId: number,
   sessionId: string,
   questionId: string,
   answer: string,
   selectedOption?: string,
-  handlers?: SseEventHandler,
-  options?: { signal?: AbortSignal }
-): Promise<{ close: () => void }> {
-  return connectSse(
-    `/novels/${novelId}/agent/answer-question`,
-    {
-      session_id: sessionId,
-      question_id: questionId,
-      answer,
-      selected_option: selectedOption ?? null,
-    },
-    handlers || {},
-    options
-  );
+): Promise<void> {
+  await api.post(`/novels/${novelId}/agent/answer-question`, {
+    session_id: sessionId,
+    question_id: questionId,
+    answer,
+    selected_option: selectedOption ?? null,
+  });
 }
 
 export async function getAgentSession(

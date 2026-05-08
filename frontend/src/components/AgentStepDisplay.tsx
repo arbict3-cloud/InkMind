@@ -25,8 +25,19 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   poll_task_result: "agent_tool_poll_task_result",
   poll_multiple_tasks: "agent_tool_poll_multiple_tasks",
   save_chapter: "agent_tool_save_chapter",
+  delete_chapter: "agent_tool_delete_chapter",
   ask_user: "agent_tool_ask_user",
 };
+
+function cleanToolName(raw: string): string {
+  return raw
+    .replace(/^mcp__inkmind__/, "")
+    .replace(/^InkMind::/, "");
+}
+
+function isInternalTool(name: string): boolean {
+  return /^tool_[a-f0-9_]+$/.test(name);
+}
 
 function groupSteps(steps: SseAgentStepData[], t: (key: string) => string): GroupedStep[] {
   const result: GroupedStep[] = [];
@@ -35,7 +46,8 @@ function groupSteps(steps: SseAgentStepData[], t: (key: string) => string): Grou
   for (const step of steps) {
     if (step.step_type === "tool_call") {
       const rawName = step.tool_name || "unknown";
-      const displayName = rawName.replace(/^mcp__inkmind__/, "");
+      const displayName = cleanToolName(rawName);
+      if (isInternalTool(displayName)) continue;
       const idx = result.length;
       pendingCalls.set(displayName, idx);
       result.push({
@@ -46,7 +58,7 @@ function groupSteps(steps: SseAgentStepData[], t: (key: string) => string): Grou
       });
     } else if (step.step_type === "tool_result") {
       const rawName = step.tool_name || "unknown";
-      const displayName = rawName.replace(/^mcp__inkmind__/, "");
+      const displayName = cleanToolName(rawName);
       const pendingIdx = pendingCalls.get(displayName);
 
       if (pendingIdx !== undefined) {
@@ -56,7 +68,7 @@ function groupSteps(steps: SseAgentStepData[], t: (key: string) => string): Grou
           result[pendingIdx].result = preview.length > 80 ? preview.slice(0, 80) + "…" : preview;
         }
         pendingCalls.delete(displayName);
-      } else {
+      } else if (!isInternalTool(displayName)) {
         result.push({
           rawName,
           tool_name: displayName,

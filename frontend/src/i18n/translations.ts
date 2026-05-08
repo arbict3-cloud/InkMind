@@ -1018,6 +1018,7 @@ export const translations: Record<Language, Record<string, string>> = {
     agent_tool_poll_task_result: "轮询任务结果",
     agent_tool_poll_multiple_tasks: "批量轮询任务",
     agent_tool_save_chapter: "保存章节",
+    agent_tool_delete_chapter: "删除章节",
     agent_tool_ask_user: "询问用户",
   },
   en: {
@@ -2031,6 +2032,7 @@ export const translations: Record<Language, Record<string, string>> = {
     agent_tool_poll_task_result: "Poll task result",
     agent_tool_poll_multiple_tasks: "Poll multiple tasks",
     agent_tool_save_chapter: "Save chapter",
+    agent_tool_delete_chapter: "Delete chapter",
     agent_tool_ask_user: "Ask user",
   },
 };

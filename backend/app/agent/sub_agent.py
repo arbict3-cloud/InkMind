@@ -57,13 +57,19 @@ def _resolve_sub_agent_llm(
     explicit_provider: str | None = None,
 ) -> LLMProvider:
     provider = explicit_provider or settings.default_llm_provider
-    if provider == "anthropic":
-        fallback = "qwen" if settings.qwen_api_key else "openai"
-        log.info(
-            "Sub-agent: anthropic is reserved for orchestrator, using %s for content generation",
-            fallback,
-        )
-        provider = fallback
+    if provider in ("anthropic", "auto"):
+        for fallback in ("qwen", "deepseek", "minimax", "openai"):
+            key = getattr(settings, f"{fallback}_api_key", None) if fallback != "openai" else settings.openai_api_key
+            if key:
+                log.info(
+                    "Sub-agent: %s is reserved for orchestrator, using %s for content generation",
+                    provider,
+                    fallback,
+                )
+                provider = fallback
+                break
+        else:
+            provider = "openai"
     return get_llm(provider)
 
 

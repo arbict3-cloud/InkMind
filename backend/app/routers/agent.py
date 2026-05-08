@@ -148,7 +148,7 @@ async def answer_question(
     user: CurrentUser,
     db: Annotated[Session, Depends(get_db)],
     language: Language,
-) -> StreamingResponse:
+) -> dict[str, Any]:
     novel = _get_owned_novel(db, user.id, novel_id)
     orchestrator = _create_orchestrator(db, user, novel, language)
 
@@ -159,23 +159,14 @@ async def answer_question(
             detail=f"会话不存在: {body.session_id}",
         )
 
-    async def gen():
-        try:
-            async for event in orchestrator.answer_question(
-                session, body.question_id, body.answer, body.selected_option
-            ):
-                log.debug("SSE send (answer): event_type=%s", event.event_type)
-                yield event.encode()
-        except Exception as e:
-            log.exception("Agent answer_question error")
-            from app.llm.sse_stream import sse_error
-            yield sse_error(message=str(e)).encode()
+    from app.agent.agent_tools import resolve_ask_user_answer
+    answer_text = body.selected_option or body.answer
+    resolved = resolve_ask_user_answer(body.question_id, answer_text)
 
-    return StreamingResponse(
-        gen(),
-        media_type="text/event-stream",
-        headers=_STREAM_HEADERS,
-    )
+    if not resolved:
+        session.pending_question = None
+
+    return {"status": "ok", "resolved": resolved}
 
 
 @router.get("/sessions/{session_id}")

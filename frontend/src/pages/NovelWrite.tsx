@@ -512,6 +512,39 @@ export default function NovelWrite() {
   }, [loadChapters, flushSave]);
 
   useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && detail.id) {
+        try {
+          await flushSave();
+        } catch { /* ignore */ }
+        const full = await loadChapters();
+        const deletedId = detail.id;
+        if (activeId === deletedId) {
+          const remaining = full.filter((c) => c.id !== deletedId);
+          if (remaining.length > 0) {
+            const next = remaining[0];
+            setActiveId(next.id);
+            lastLoadedChapterIdRef.current = null;
+            setTitle(next.title);
+            setSummary(next.summary || "");
+            setContent(normalizeBodyParagraphIndent(next.content || ""));
+          } else {
+            setActiveId(null);
+            lastLoadedChapterIdRef.current = null;
+            setTitle("");
+            setSummary("");
+            setContent("");
+          }
+        }
+        setChapters(full);
+      }
+    };
+    window.addEventListener("inkmind:chapter-deleted", handler);
+    return () => window.removeEventListener("inkmind:chapter-deleted", handler);
+  }, [loadChapters, flushSave, activeId]);
+
+  useEffect(() => {
     setEvaluateResult(null);
     setGenerateTab("single");
     setSingleGenerateTitle("");

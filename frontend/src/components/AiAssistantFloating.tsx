@@ -81,7 +81,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-  const resizeRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const resizeRef = useRef<{ x: number; y: number; w: number; h: number; px: number; py: number; corner: string } | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -139,13 +139,14 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
   }, [isDragging, position]);
 
-  const handleResizeStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+  const handleResizeStart = useCallback((corner: string) => (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
     const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
-    resizeRef.current = { x: cx, y: cy, w: panelSize.width, h: panelSize.height };
+    resizeRef.current = { x: cx, y: cy, w: panelSize.width, h: panelSize.height, px: position.x, py: position.y, corner };
     setIsResizing(true);
-  }, [panelSize]);
+  }, [panelSize, position]);
 
   useEffect(() => {
     if (!isResizing) return;
@@ -153,17 +154,43 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       if (!resizeRef.current) return;
       const cx = "touches" in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
       const cy = "touches" in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
-      const nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, resizeRef.current.w - (cx - resizeRef.current.x)));
-      const nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, resizeRef.current.h + (cy - resizeRef.current.y)));
+      const ref = resizeRef.current;
+      const dx = cx - ref.x;
+      const dy = cy - ref.y;
+
+      let nw = ref.w;
+      let nh = ref.h;
+      let nx = ref.px;
+      let ny = ref.py;
+
+      if (ref.corner === "se") {
+        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w + dx));
+        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h + dy));
+        nx = ref.px + dx;
+      } else if (ref.corner === "sw") {
+        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w - dx));
+        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h + dy));
+      } else if (ref.corner === "ne") {
+        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w + dx));
+        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h - dy));
+        nx = ref.px + dx;
+        ny = ref.py + dy;
+      } else if (ref.corner === "nw") {
+        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w - dx));
+        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h - dy));
+        ny = ref.py + dy;
+      }
+
       setPanelSize({ width: nw, height: nh });
+      setPosition({ x: nx, y: ny });
     };
-    const onUp = () => { setIsResizing(false); saveJson(PANEL_SIZE_KEY, panelSize); resizeRef.current = null; };
+    const onUp = () => { setIsResizing(false); saveJson(PANEL_SIZE_KEY, panelSize); saveJson(POSITION_KEY, position); resizeRef.current = null; };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     window.addEventListener("touchmove", onMove, { passive: false });
     window.addEventListener("touchend", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
-  }, [isResizing, panelSize]);
+  }, [isResizing, panelSize, position]);
 
   const buildChatHandlers = useCallback((aid: string) => ({
     onPatch: (data: any) => {
@@ -188,8 +215,22 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       console.log("[ChapterSaved]", data.id, data.title);
       window.dispatchEvent(new CustomEvent("inkmind:chapter-saved", { detail: data }));
     },
-    onStatus: (data: any) => { setStatus(data.status || "idle"); },
-    onDone: () => { setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, isStreaming: false } : m)); setIsLoading(false); },
+    onChapterDeleted: (data: any) => {
+      console.log("[ChapterDeleted]", data.id, data.title);
+      window.dispatchEvent(new CustomEvent("inkmind:chapter-deleted", { detail: data }));
+    },
+    onStatus: (data: any) => {
+      const s = data.status || "idle";
+      setStatus(s);
+      if (s === "waiting_for_user") {
+        setIsLoading(false);
+      }
+    },
+    onDone: () => {
+      setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, isStreaming: false } : m));
+      setAgentSteps((prev) => [...prev, { step_type: "finish" as const, is_parallel: false, ts: Date.now() }]);
+      setIsLoading(false);
+    },
     onError: (data: any) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },
   }), []);
 
@@ -241,38 +282,16 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     if (!session || !pendingQuestion) return;
     setPendingQuestion(null);
     setIsLoading(true);
-    setAgentSteps([]);
     const answerText = selectedOption || answer;
     setMessages((prev) => [...prev, { id: generateId(), role: "user", content: answerText, timestamp: Date.now() }]);
 
     try {
-      const aid = generateId();
-      setMessages((prev) => [...prev, { id: aid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true }]);
-      const handlers = buildChatHandlers(aid);
-      const retryOnError = {
-        ...handlers,
-        onError: async (data: any) => {
-          const msg = data.message || "";
-          if (msg.includes("会话不存在") || msg.includes("not found")) {
-            resetSession();
-            try {
-              const newSess = await createNewSession();
-              await agentAnswerQuestion(novelId!, newSess.session_id, questionId, answer, selectedOption, buildChatHandlers(aid));
-            } catch {
-              setMessages((prev) => [...prev, { id: generateId(), role: "error", content: "创建新会话失败", timestamp: Date.now() }]);
-              setIsLoading(false);
-            }
-          } else {
-            handlers.onError(data);
-          }
-        },
-      };
-      await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption, retryOnError);
+      await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption);
     } catch (err) {
       setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
       setIsLoading(false);
     }
-  }, [session, pendingQuestion, novelId, resetSession, createNewSession, buildChatHandlers]);
+  }, [session, pendingQuestion, novelId]);
 
   const getToolDisplayName = (name: string) => {
     const key = TOOL_DISPLAY_NAMES[name];
@@ -291,16 +310,19 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         <button
           type="button"
           className="ai-assistant-float-btn"
-          style={{ right: `${Math.abs(position.x)}px`, top: `${position.y}px`, transform: isDragging ? "scale(1.1)" : undefined }}
+          style={{ right: `${Math.abs(position.x)}px`, top: `${position.y}px`, transform: isDragging ? "scale(1.05)" : undefined }}
           onClick={() => setIsOpen(true)}
           onMouseDown={handleDragStart}
           onTouchStart={handleDragStart}
+          title={t("smart_writer_title")}
         >
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.5V20h6v-2.5c2.9-1.2 5-4.1 5-7.5a8 8 0 0 0-8-8z" />
+            <path d="M9 20h6" />
+            <path d="M10 22h4" />
+            <path d="M9 8l2 2 4-4" />
           </svg>
+          <span className="ai-assistant-float-btn__label">AI</span>
         </button>
       )}
 
@@ -397,10 +419,24 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
           </div>
 
           <div
-            className="ai-assistant-panel__resize-handle"
-            onMouseDown={handleResizeStart}
-            onTouchStart={handleResizeStart}
-            style={{ cursor: isResizing ? "se-resize" : "sw-resize" }}
+            className="ai-assistant-panel__resize ai-assistant-panel__resize--nw"
+            onMouseDown={handleResizeStart("nw")}
+            onTouchStart={handleResizeStart("nw")}
+          />
+          <div
+            className="ai-assistant-panel__resize ai-assistant-panel__resize--ne"
+            onMouseDown={handleResizeStart("ne")}
+            onTouchStart={handleResizeStart("ne")}
+          />
+          <div
+            className="ai-assistant-panel__resize ai-assistant-panel__resize--sw"
+            onMouseDown={handleResizeStart("sw")}
+            onTouchStart={handleResizeStart("sw")}
+          />
+          <div
+            className="ai-assistant-panel__resize ai-assistant-panel__resize--se"
+            onMouseDown={handleResizeStart("se")}
+            onTouchStart={handleResizeStart("se")}
           />
         </div>
       )}

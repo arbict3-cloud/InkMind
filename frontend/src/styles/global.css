@@ -5257,24 +5257,34 @@ select {
   position: fixed;
   right: 20px;
   top: 72px;
-  width: auto;
-  height: auto;
-  border-radius: 0;
-  background: transparent;
-  color: var(--accent, #cc785c);
+  height: 44px;
+  min-width: 44px;
+  border-radius: 22px;
+  background: var(--accent, #cc785c);
+  color: #fff;
   border: none;
   cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: none;
-  transition: transform 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+  gap: 6px;
+  box-shadow: 0 2px 12px rgba(204, 120, 92, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
   z-index: 9999;
-  padding: 8px;
+  padding: 0 14px 0 12px;
+  font-family: var(--font-ui);
+}
+
+.ai-assistant-float-btn__label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
 }
 
 .ai-assistant-float-btn:hover {
-  transform: scale(1.15);
+  transform: scale(1.06);
+  box-shadow: 0 4px 20px rgba(204, 120, 92, 0.45);
 }
 
 .ai-assistant-float-btn:active {
@@ -5315,37 +5325,35 @@ select {
   }
 }
 
-.ai-assistant-panel__resize-handle {
+.ai-assistant-panel__resize {
   position: absolute;
+  width: 14px;
+  height: 14px;
+  z-index: 10;
+}
+
+.ai-assistant-panel__resize--nw {
+  top: 0;
+  left: 0;
+  cursor: nw-resize;
+}
+
+.ai-assistant-panel__resize--ne {
+  top: 0;
+  right: 0;
+  cursor: ne-resize;
+}
+
+.ai-assistant-panel__resize--sw {
   bottom: 0;
   left: 0;
-  width: 24px;
-  height: 24px;
   cursor: sw-resize;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  opacity: 0.5;
-  transition: opacity 0.2s ease;
 }
 
-.ai-assistant-panel__resize-handle:hover {
-  opacity: 1;
-}
-
-.ai-assistant-panel__resize-handle::before {
-  content: "";
-  width: 12px;
-  height: 12px;
-  border-left: 2px solid var(--muted, #6c6a64);
-  border-bottom: 2px solid var(--muted, #6c6a64);
-  border-radius: 2px;
-}
-
-.ai-assistant-panel__resize-handle:active::before {
-  border-color: var(--accent, #cc785c);
+.ai-assistant-panel__resize--se {
+  bottom: 0;
+  right: 0;
+  cursor: se-resize;
 }
 
 .ai-assistant-header {

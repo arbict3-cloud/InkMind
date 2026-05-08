@@ -186,6 +186,23 @@ def sse_chapter_saved(
     )
 
 
+def sse_chapter_deleted(
+    *,
+    chapter_id: int,
+    title: str,
+    novel_id: int,
+) -> SseEvent:
+    return SseEvent(
+        event_type="chapter_deleted",
+        data={
+            "id": chapter_id,
+            "title": title,
+            "novel_id": novel_id,
+            "ts": time.time(),
+        },
+    )
+
+
 def sse_done(*, workflow_id: str | None = None, progress: dict[str, Any] | None = None) -> SseEvent:
     data: dict[str, Any] = {"done": True}
     if workflow_id:
@@ -332,6 +349,19 @@ class SseStreamBuilder:
             title=title,
             novel_id=novel_id,
             word_count=word_count,
+        )
+
+    def build_chapter_deleted(
+        self,
+        *,
+        chapter_id: int,
+        title: str,
+        novel_id: int,
+    ) -> SseEvent:
+        return sse_chapter_deleted(
+            chapter_id=chapter_id,
+            title=title,
+            novel_id=novel_id,
         )
 
     def build_done(self, progress: dict[str, Any] | None = None) -> SseEvent:

@@ -14,6 +14,7 @@ Claude 通过 ClaudeSDKClient 调用它们。
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -30,7 +31,10 @@ from app.models import Chapter, Character, Novel, NovelMemo
 log = logging.getLogger(__name__)
 
 _db_session_factory: Any = None
-_novel_id: int | None = None
+_novel_id: int = 0
+
+_pending_ask_user_events: dict[str, asyncio.Event] = {}
+_pending_ask_user_answers: dict[str, str] = {}
 
 
 def init_tool_context(db_session_factory: Any, novel_id: int) -> None:
@@ -325,6 +329,32 @@ async def save_chapter(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "delete_chapter",
+    "删除指定章节。需要提供章节 ID，删除前应先确认用户意图。",
+    {"chapter_id": int},
+)
+async def delete_chapter(args: dict[str, Any]) -> dict[str, Any]:
+    db = _get_db()
+    chapter_id = args["chapter_id"]
+
+    chapter = db.get(Chapter, chapter_id)
+    if not chapter:
+        db.close()
+        return {"content": [{"type": "text", "text": json.dumps({"success": False, "error": f"章节 {chapter_id} 不存在"}, ensure_ascii=False)}]}
+
+    if chapter.novel_id != _novel_id:
+        db.close()
+        return {"content": [{"type": "text", "text": json.dumps({"success": False, "error": "章节不属于当前作品"}, ensure_ascii=False)}]}
+
+    title = chapter.title
+    db.delete(chapter)
+    db.commit()
+    db.close()
+
+    return {"content": [{"type": "text", "text": json.dumps({"success": True, "chapter_id": chapter_id, "title": title}, ensure_ascii=False, indent=2)}]}
+
+
+@tool(
     "ask_user",
     "向用户提问以获取确认、选择或补充信息。当需要用户决策时使用。",
     {"question": str, "options": list, "header": str, "allow_custom": bool},
@@ -336,17 +366,23 @@ async def ask_user(args: dict[str, Any]) -> dict[str, Any]:
     allow_custom = args.get("allow_custom", True)
 
     question_id = str(uuid.uuid4())
-    opts_str = " / ".join(f"{i+1}. {o}" for i, o in enumerate(options)) if options else "自由输入"
-    result = {
-        "question_id": question_id,
-        "question": question,
-        "options": options,
-        "header": header,
-        "allow_custom": allow_custom,
-        "status": "waiting_for_user",
-        "message": f"已向用户提问：{question}（选项：{opts_str}）",
-    }
-    return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
+    event = asyncio.Event()
+    _pending_ask_user_events[question_id] = event
+
+    await event.wait()
+
+    answer = _pending_ask_user_answers.pop(question_id, "")
+    _pending_ask_user_events.pop(question_id, None)
+
+    return {"content": [{"type": "text", "text": f"用户回答: {answer}"}]}
+
+
+def resolve_ask_user_answer(question_id: str, answer: str) -> bool:
+    if question_id not in _pending_ask_user_events:
+        return False
+    _pending_ask_user_answers[question_id] = answer
+    _pending_ask_user_events[question_id].set()
+    return True
 
 
 ALL_TOOLS = [

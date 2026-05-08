@@ -38,7 +38,7 @@ from claude_agent_sdk import (
     create_sdk_mcp_server,
 )
 
-from app.agent.agent_tools import ALL_TOOLS, ALL_TOOL_NAMES, init_tool_context
+from app.agent.agent_tools import ALL_TOOLS, ALL_TOOL_NAMES, init_tool_context, resolve_ask_user_answer
 from app.agent.sub_agent import register_sub_agent_handlers
 from app.agent.task_queue import get_task_queue
 from app.config import settings
@@ -210,8 +210,7 @@ class ClaudeOrchestrator:
                             tool_id = block.id
                             log.info("ToolUseBlock: name=%s, input_keys=%s", tool_name, list(tool_input.keys()) if isinstance(tool_input, dict) else "non-dict")
 
-                            if "save_chapter" in tool_name:
-                                pending_tool_calls[tool_id] = "save_chapter"
+                            pending_tool_calls[tool_id] = tool_name
 
                             if "ask_user" in tool_name:
                                 question = tool_input.get("question", "") if isinstance(tool_input, dict) else ""
@@ -223,10 +222,6 @@ class ClaudeOrchestrator:
                                     tool_name=tool_name,
                                     params=tool_input if isinstance(tool_input, dict) else None,
                                     thought=f"调用 {tool_name}",
-                                )
-                                yield builder.build_tool_result_step(
-                                    tool_name=tool_name,
-                                    result_preview="等待用户回答",
                                 )
                                 yield builder.build_question(
                                     question=question,
@@ -240,13 +235,9 @@ class ClaudeOrchestrator:
                                     "header": header,
                                     "allow_custom": allow_custom,
                                 }
-                                yield builder.build_status("idle")
-                                yield builder.build_done()
+                                yield builder.build_status("waiting_for_user")
 
-                                async for _msg in client.receive_response():
-                                    pass
-
-                                return
+                                continue
 
                             yield builder.build_tool_call_step(
                                 tool_name=tool_name,
@@ -267,7 +258,7 @@ class ClaudeOrchestrator:
                                             break
 
                                 tracked_tool = pending_tool_calls.pop(tool_use_id, None)
-                                if tracked_tool == "save_chapter" and preview:
+                                if tracked_tool and "save_chapter" in tracked_tool and preview:
                                     try:
                                         result_data = json.loads(preview)
                                         if result_data.get("success"):
@@ -280,8 +271,33 @@ class ClaudeOrchestrator:
                                     except (json.JSONDecodeError, KeyError):
                                         pass
 
+                                if tracked_tool and "delete_chapter" in tracked_tool and preview:
+                                    try:
+                                        result_data = json.loads(preview)
+                                        if result_data.get("success"):
+                                            yield builder.build_chapter_deleted(
+                                                chapter_id=result_data["chapter_id"],
+                                                title=result_data.get("title", ""),
+                                                novel_id=session.novel_id,
+                                            )
+                                    except (json.JSONDecodeError, KeyError):
+                                        pass
+
+                                if tracked_tool and "delete_chapter" in tracked_tool and preview:
+                                    try:
+                                        result_data = json.loads(preview)
+                                        if result_data.get("success"):
+                                            yield builder.build_chapter_deleted(
+                                                chapter_id=result_data["chapter_id"],
+                                                title=result_data.get("title", ""),
+                                                novel_id=session.novel_id,
+                                            )
+                                    except (json.JSONDecodeError, KeyError):
+                                        pass
+
+                                result_tool_name = tracked_tool or f"tool_{tool_use_id[:8]}"
                                 yield builder.build_tool_result_step(
-                                    tool_name=f"tool_{tool_use_id[:8]}",
+                                    tool_name=result_tool_name,
                                     result_preview=preview,
                                 )
 
@@ -291,9 +307,6 @@ class ClaudeOrchestrator:
                         if message.errors:
                             err_msg = "; ".join(message.errors)
                         yield builder.build_error(err_msg)
-                    elif message.result:
-                        full_text += message.result
-                        yield builder.build_text_delta(message.result)
 
             yield builder.build_status("idle")
             yield builder.build_done()
@@ -313,132 +326,19 @@ class ClaudeOrchestrator:
     ) -> AsyncIterator[SseEvent]:
         """用户回答了 Claude 的问题，继续对话。
 
-        将用户回答作为新消息发送给 SDK Client，
-        Claude 会看到之前的 ask_user 调用和用户的回答，
-        然后继续推理。
+        通过 resolve_ask_user_answer 解除 ask_user 工具的阻塞，
+        SDK 会自动继续处理，chat() 的 receive_response() 循环会收到后续消息。
         """
         answer_text = selected_option or answer
         session.pending_question = None
-        builder = SseStreamBuilder(workflow_id=session.session_id)
 
+        resolve_ask_user_answer(question_id, answer_text)
+
+        builder = SseStreamBuilder(workflow_id=session.session_id)
         yield builder.build_user_message(answer_text)
         yield builder.build_status("running")
-
-        try:
-            client = session.sdk_client
-            if client is None:
-                async for event in self.chat(session, answer_text):
-                    yield event
-                return
-
-            await client.query(answer_text)
-
-            full_text = ""
-            pending_tool_calls: dict[str, str] = {}
-            async for message in client.receive_response():
-                if isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            full_text += block.text
-                            yield builder.build_text_delta(block.text)
-                        elif isinstance(block, ToolUseBlock):
-                            tool_name = block.name
-                            tool_input = block.input
-                            tool_id = block.id
-
-                            if "save_chapter" in tool_name:
-                                pending_tool_calls[tool_id] = "save_chapter"
-
-                            if "ask_user" in tool_name:
-                                question = tool_input.get("question", "") if isinstance(tool_input, dict) else ""
-                                options = tool_input.get("options") if isinstance(tool_input, dict) else None
-                                header = tool_input.get("header") if isinstance(tool_input, dict) else None
-                                allow_custom = tool_input.get("allow_custom", True) if isinstance(tool_input, dict) else True
-
-                                yield builder.build_tool_call_step(
-                                    tool_name=tool_name,
-                                    params=tool_input if isinstance(tool_input, dict) else None,
-                                    thought=f"调用 {tool_name}",
-                                )
-                                yield builder.build_tool_result_step(
-                                    tool_name=tool_name,
-                                    result_preview="等待用户回答",
-                                )
-                                yield builder.build_question(
-                                    question=question,
-                                    options=options,
-                                    header=header,
-                                    allow_custom=allow_custom,
-                                )
-                                session.pending_question = {
-                                    "question": question,
-                                    "options": options,
-                                    "header": header,
-                                    "allow_custom": allow_custom,
-                                }
-                                yield builder.build_status("idle")
-                                yield builder.build_done()
-
-                                async for _msg in client.receive_response():
-                                    pass
-
-                                return
-
-                            yield builder.build_tool_call_step(
-                                tool_name=tool_name,
-                                params=tool_input if isinstance(tool_input, dict) else None,
-                                thought=f"调用 {tool_name}",
-                            )
-
-                elif isinstance(message, UserMessage):
-                    if isinstance(message.content, list):
-                        for block in message.content:
-                            if isinstance(block, ToolResultBlock):
-                                tool_use_id = block.tool_use_id
-                                preview = ""
-                                if block.content:
-                                    for c in block.content:
-                                        if hasattr(c, "text"):
-                                            preview = c.text[:200]
-                                            break
-
-                                tracked_tool = pending_tool_calls.pop(tool_use_id, None)
-                                if tracked_tool == "save_chapter" and preview:
-                                    try:
-                                        result_data = json.loads(preview)
-                                        if result_data.get("success"):
-                                            yield builder.build_chapter_saved(
-                                                chapter_id=result_data["chapter_id"],
-                                                title=result_data.get("title", ""),
-                                                novel_id=session.novel_id,
-                                                word_count=result_data.get("word_count", 0),
-                                            )
-                                    except (json.JSONDecodeError, KeyError):
-                                        pass
-
-                                yield builder.build_tool_result_step(
-                                    tool_name=f"tool_{tool_use_id[:8]}",
-                                    result_preview=preview,
-                                )
-
-                elif isinstance(message, ResultMessage):
-                    if message.is_error:
-                        err_msg = message.result or "Agent 执行出错"
-                        if message.errors:
-                            err_msg = "; ".join(message.errors)
-                        yield builder.build_error(err_msg)
-                    elif message.result:
-                        full_text += message.result
-                        yield builder.build_text_delta(message.result)
-
-            yield builder.build_status("idle")
-            yield builder.build_done()
-
-        except Exception as e:
-            log.exception("ClaudeOrchestrator answer_question error")
-            yield builder.build_error(f"Agent 调用失败: {e}")
-            yield builder.build_status("idle")
-            yield builder.build_done()
+        yield builder.build_status("idle")
+        yield builder.build_done()
 
     async def close_session(self, session: OrchestratorSession) -> None:
         """关闭会话，释放 SDK Client 资源。"""

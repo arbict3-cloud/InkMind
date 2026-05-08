@@ -2,7 +2,7 @@
  * SSE 流式传输类型定义
  */
 
-export type SseEventType = "snapshot" | "patch" | "delta" | "status" | "question" | "agent_step" | "chapter_saved" | "error" | "done";
+export type SseEventType = "snapshot" | "patch" | "delta" | "status" | "question" | "agent_step" | "chapter_saved" | "chapter_deleted" | "error" | "done";
 
 export interface SseSnapshotData {
   messages: SseMessage[];
@@ -66,6 +66,13 @@ export interface SseChapterSavedData {
   ts: number;
 }
 
+export interface SseChapterDeletedData {
+  id: number;
+  title: string;
+  novel_id: number;
+  ts: number;
+}
+
 export interface SseDoneData {
   done: true;
   workflow_id?: string;
@@ -92,6 +99,7 @@ export type SseEventMap = {
   question: PendingQuestionData;
   agent_step: SseAgentStepData;
   chapter_saved: SseChapterSavedData;
+  chapter_deleted: SseChapterDeletedData;
   error: SseErrorData;
   done: SseDoneData;
 };
