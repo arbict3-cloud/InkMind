@@ -885,6 +885,7 @@ export type SseEventHandler = {
   onStatus?: (data: import("@/types/sse").SseStatusData) => void;
   onQuestion?: (data: import("@/types/sse").PendingQuestionData) => void;
   onAgentStep?: (data: import("@/types/sse").SseAgentStepData) => void;
+  onChapterSaved?: (data: import("@/types/sse").SseChapterSavedData) => void;
   onError?: (data: import("@/types/sse").SseErrorData) => void;
   onDone?: (data: import("@/types/sse").SseDoneData) => void;
 };
@@ -966,6 +967,9 @@ export function connectSse(
                   break;
                 case "agent_step":
                   handlers.onAgentStep?.(parsed);
+                  break;
+                case "chapter_saved":
+                  handlers.onChapterSaved?.(parsed);
                   break;
                 case "error":
                   handlers.onError?.(parsed);

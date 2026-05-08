@@ -167,6 +167,25 @@ def sse_error(*, message: str, code: str | None = None) -> SseEvent:
     return SseEvent(event_type="error", data=data)
 
 
+def sse_chapter_saved(
+    *,
+    chapter_id: int,
+    title: str,
+    novel_id: int,
+    word_count: int = 0,
+) -> SseEvent:
+    return SseEvent(
+        event_type="chapter_saved",
+        data={
+            "id": chapter_id,
+            "title": title,
+            "novel_id": novel_id,
+            "word_count": word_count,
+            "ts": time.time(),
+        },
+    )
+
+
 def sse_done(*, workflow_id: str | None = None, progress: dict[str, Any] | None = None) -> SseEvent:
     data: dict[str, Any] = {"done": True}
     if workflow_id:
@@ -298,6 +317,21 @@ class SseStreamBuilder:
             status=status,
             workflow_id=self._workflow_id,
             current_phase=current_phase,
+        )
+
+    def build_chapter_saved(
+        self,
+        *,
+        chapter_id: int,
+        title: str,
+        novel_id: int,
+        word_count: int = 0,
+    ) -> SseEvent:
+        return sse_chapter_saved(
+            chapter_id=chapter_id,
+            title=title,
+            novel_id=novel_id,
+            word_count=word_count,
         )
 
     def build_done(self, progress: dict[str, Any] | None = None) -> SseEvent:

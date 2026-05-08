@@ -184,6 +184,10 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       console.log("[Question]", data.question, data.options);
       setPendingQuestion(data);
     },
+    onChapterSaved: (data: any) => {
+      console.log("[ChapterSaved]", data.id, data.title);
+      window.dispatchEvent(new CustomEvent("inkmind:chapter-saved", { detail: data }));
+    },
     onStatus: (data: any) => { setStatus(data.status || "idle"); },
     onDone: () => { setMessages((prev) => prev.map((m) => m.id === aid ? { ...m, isStreaming: false } : m)); setIsLoading(false); },
     onError: (data: any) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },

@@ -195,6 +195,8 @@ class ClaudeOrchestrator:
             _, start_event = builder.build_assistant_message_start("")
             yield start_event
 
+            pending_tool_calls: dict[str, str] = {}
+
             async for message in client.receive_response():
                 log.debug("SDK message type=%s", type(message).__name__)
                 if isinstance(message, AssistantMessage):
@@ -205,7 +207,11 @@ class ClaudeOrchestrator:
                         elif isinstance(block, ToolUseBlock):
                             tool_name = block.name
                             tool_input = block.input
+                            tool_id = block.id
                             log.info("ToolUseBlock: name=%s, input_keys=%s", tool_name, list(tool_input.keys()) if isinstance(tool_input, dict) else "non-dict")
+
+                            if "save_chapter" in tool_name:
+                                pending_tool_calls[tool_id] = "save_chapter"
 
                             if "ask_user" in tool_name:
                                 question = tool_input.get("question", "") if isinstance(tool_input, dict) else ""
@@ -252,15 +258,30 @@ class ClaudeOrchestrator:
                     if isinstance(message.content, list):
                         for block in message.content:
                             if isinstance(block, ToolResultBlock):
-                                tool_id = block.tool_use_id
+                                tool_use_id = block.tool_use_id
                                 preview = ""
                                 if block.content:
                                     for c in block.content:
                                         if hasattr(c, "text"):
                                             preview = c.text[:200]
                                             break
+
+                                tracked_tool = pending_tool_calls.pop(tool_use_id, None)
+                                if tracked_tool == "save_chapter" and preview:
+                                    try:
+                                        result_data = json.loads(preview)
+                                        if result_data.get("success"):
+                                            yield builder.build_chapter_saved(
+                                                chapter_id=result_data["chapter_id"],
+                                                title=result_data.get("title", ""),
+                                                novel_id=session.novel_id,
+                                                word_count=result_data.get("word_count", 0),
+                                            )
+                                    except (json.JSONDecodeError, KeyError):
+                                        pass
+
                                 yield builder.build_tool_result_step(
-                                    tool_name=f"tool_{tool_id[:8]}",
+                                    tool_name=f"tool_{tool_use_id[:8]}",
                                     result_preview=preview,
                                 )
 
@@ -313,6 +334,7 @@ class ClaudeOrchestrator:
             await client.query(answer_text)
 
             full_text = ""
+            pending_tool_calls: dict[str, str] = {}
             async for message in client.receive_response():
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
@@ -322,6 +344,10 @@ class ClaudeOrchestrator:
                         elif isinstance(block, ToolUseBlock):
                             tool_name = block.name
                             tool_input = block.input
+                            tool_id = block.id
+
+                            if "save_chapter" in tool_name:
+                                pending_tool_calls[tool_id] = "save_chapter"
 
                             if "ask_user" in tool_name:
                                 question = tool_input.get("question", "") if isinstance(tool_input, dict) else ""
@@ -368,15 +394,30 @@ class ClaudeOrchestrator:
                     if isinstance(message.content, list):
                         for block in message.content:
                             if isinstance(block, ToolResultBlock):
-                                tool_id = block.tool_use_id
+                                tool_use_id = block.tool_use_id
                                 preview = ""
                                 if block.content:
                                     for c in block.content:
                                         if hasattr(c, "text"):
                                             preview = c.text[:200]
                                             break
+
+                                tracked_tool = pending_tool_calls.pop(tool_use_id, None)
+                                if tracked_tool == "save_chapter" and preview:
+                                    try:
+                                        result_data = json.loads(preview)
+                                        if result_data.get("success"):
+                                            yield builder.build_chapter_saved(
+                                                chapter_id=result_data["chapter_id"],
+                                                title=result_data.get("title", ""),
+                                                novel_id=session.novel_id,
+                                                word_count=result_data.get("word_count", 0),
+                                            )
+                                    except (json.JSONDecodeError, KeyError):
+                                        pass
+
                                 yield builder.build_tool_result_step(
-                                    tool_name=f"tool_{tool_id[:8]}",
+                                    tool_name=f"tool_{tool_use_id[:8]}",
                                     result_preview=preview,
                                 )
 
