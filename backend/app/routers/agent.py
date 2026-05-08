@@ -159,9 +159,18 @@ async def answer_question(
             detail=f"会话不存在: {body.session_id}",
         )
 
-    from app.agent.agent_tools import resolve_ask_user_answer
+    from app.agent.claude_orchestrator import _resolve_user_input
     answer_text = body.selected_option or body.answer
-    resolved = resolve_ask_user_answer(body.question_id, answer_text)
+
+    answers: dict[str, str] = {}
+    if session and session.pending_question and session.pending_question.get("questions"):
+        for q in session.pending_question["questions"]:
+            q_text = q.get("question", "") if isinstance(q, dict) else ""
+            answers[q_text] = answer_text
+    else:
+        answers[""] = answer_text
+
+    resolved = _resolve_user_input(body.question_id, answers)
 
     if not resolved:
         session.pending_question = None

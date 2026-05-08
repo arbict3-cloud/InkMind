@@ -14,7 +14,6 @@ Claude 通过 ClaudeSDKClient 调用它们。
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
@@ -32,9 +31,6 @@ log = logging.getLogger(__name__)
 
 _db_session_factory: Any = None
 _novel_id: int = 0
-
-_pending_ask_user_events: dict[str, asyncio.Event] = {}
-_pending_ask_user_answers: dict[str, str] = {}
 
 
 def init_tool_context(db_session_factory: Any, novel_id: int) -> None:
@@ -354,37 +350,6 @@ async def delete_chapter(args: dict[str, Any]) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps({"success": True, "chapter_id": chapter_id, "title": title}, ensure_ascii=False, indent=2)}]}
 
 
-@tool(
-    "ask_user",
-    "向用户提问以获取确认、选择或补充信息。当需要用户决策时使用。",
-    {"question": str, "options": list, "header": str, "allow_custom": bool},
-)
-async def ask_user(args: dict[str, Any]) -> dict[str, Any]:
-    question = args["question"]
-    options = args.get("options", [])
-    header = args.get("header")
-    allow_custom = args.get("allow_custom", True)
-
-    question_id = str(uuid.uuid4())
-    event = asyncio.Event()
-    _pending_ask_user_events[question_id] = event
-
-    await event.wait()
-
-    answer = _pending_ask_user_answers.pop(question_id, "")
-    _pending_ask_user_events.pop(question_id, None)
-
-    return {"content": [{"type": "text", "text": f"用户回答: {answer}"}]}
-
-
-def resolve_ask_user_answer(question_id: str, answer: str) -> bool:
-    if question_id not in _pending_ask_user_events:
-        return False
-    _pending_ask_user_answers[question_id] = answer
-    _pending_ask_user_events[question_id].set()
-    return True
-
-
 ALL_TOOLS = [
     get_novel_state,
     get_chapters,
@@ -395,7 +360,7 @@ ALL_TOOLS = [
     poll_task_result,
     poll_multiple_tasks,
     save_chapter,
-    ask_user,
+    delete_chapter,
 ]
 
 ALL_TOOL_NAMES = [f"InkMind::{t.name}" for t in ALL_TOOLS]

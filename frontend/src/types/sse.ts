@@ -32,13 +32,27 @@ export interface SseStatusData {
   ts: number;
 }
 
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface QuestionItem {
+  question: string;
+  header?: string;
+  options: QuestionOption[];
+  multiSelect?: boolean;
+}
+
 export interface PendingQuestionData {
   question_id: string;
+  questions: QuestionItem[];
   question: string;
-  options: string[];
+  options: QuestionOption[];
   header?: string;
-  allow_custom: boolean;
-  ts: number;
+  multi_select?: boolean;
+  allow_custom?: boolean;
+  ts?: number;
 }
 
 export interface SseAgentStepData {

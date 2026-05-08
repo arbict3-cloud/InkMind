@@ -112,9 +112,11 @@ def sse_question(
     *,
     question_id: str,
     question: str,
-    options: list[str] | None = None,
+    options: list[dict[str, str]] | None = None,
     header: str | None = None,
     allow_custom: bool = True,
+    multi_select: bool = False,
+    questions: list[dict[str, Any]] | None = None,
 ) -> SseEvent:
     return SseEvent(
         event_type="question",
@@ -124,6 +126,8 @@ def sse_question(
             "options": options or [],
             "header": header,
             "allow_custom": allow_custom,
+            "multi_select": multi_select,
+            "questions": questions or [],
             "ts": time.time(),
         },
     )
@@ -316,17 +320,21 @@ class SseStreamBuilder:
         self,
         question: str,
         *,
-        options: list[str] | None = None,
+        question_id: str | None = None,
+        options: list[dict[str, str]] | None = None,
         header: str | None = None,
         allow_custom: bool = True,
+        multi_select: bool = False,
+        questions: list[dict[str, Any]] | None = None,
     ) -> SseEvent:
-        question_id = str(uuid.uuid4())
         return sse_question(
-            question_id=question_id,
+            question_id=question_id or str(uuid.uuid4()),
             question=question,
             options=options,
             header=header,
             allow_custom=allow_custom,
+            multi_select=multi_select,
+            questions=questions,
         )
 
     def build_status(self, status: str, current_phase: str | None = None) -> SseEvent:
