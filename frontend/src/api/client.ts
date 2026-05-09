@@ -940,6 +940,8 @@ export function connectSse(
       let buffer = "";
       let currentEvent = "";
       let currentData = "";
+      let sawDone = false;
+      let sawError = false;
 
       function processLines(lines: string[]) {
         for (const line of lines) {
@@ -976,9 +978,11 @@ export function connectSse(
                   handlers.onChapterDeleted?.(parsed);
                   break;
                 case "error":
+                  sawError = true;
                   handlers.onError?.(parsed);
                   break;
                 case "done":
+                  sawDone = true;
                   handlers.onDone?.(parsed);
                   break;
               }
@@ -1009,6 +1013,10 @@ export function connectSse(
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
         processLines(lines);
+      }
+
+      if (!sawDone && !sawError && !controller.signal.aborted) {
+        handlers.onError?.({ message: "连接已结束，但未收到完成事件" });
       }
     })
     .catch((err) => {

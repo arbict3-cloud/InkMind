@@ -55,6 +55,10 @@ from app.models import Novel, User
 
 log = logging.getLogger(__name__)
 
+_SDK_CONNECT_TIMEOUT_SECONDS = 30.0
+_SDK_QUERY_TIMEOUT_SECONDS = 30.0
+_SDK_IDLE_TIMEOUT_SECONDS = 90.0
+
 _ORCHESTRATOR_SYSTEM_PROMPT = """你是 InkMind 的 AI 创作总监（项目总指挥）。你的职责是：
 
 1. **理解用户意图**：分析用户的创作需求，判断需要执行什么操作
@@ -291,14 +295,28 @@ class ClaudeOrchestrator:
 
         try:
             if session.sdk_client is None:
+                yield builder.build_tool_call_step(
+                    tool_name="agent_connect",
+                    thought="连接 AI 总指挥",
+                )
                 options = _build_agent_options(session.novel_id, session.session_id)
                 client = ClaudeSDKClient(options=options)
-                await client.connect()
+                await asyncio.wait_for(
+                    client.connect(),
+                    timeout=_SDK_CONNECT_TIMEOUT_SECONDS,
+                )
                 session.sdk_client = client
             else:
                 client = session.sdk_client
 
-            await client.query(user_message)
+            yield builder.build_tool_call_step(
+                tool_name="agent_query",
+                thought="发送用户请求",
+            )
+            await asyncio.wait_for(
+                client.query(user_message),
+                timeout=_SDK_QUERY_TIMEOUT_SECONDS,
+            )
 
             full_text = ""
             msg_id = str(uuid.uuid4())
@@ -308,6 +326,8 @@ class ClaudeOrchestrator:
             pending_tool_calls: dict[str, str] = {}
             sdk_queue: asyncio.Queue[Any | None] = asyncio.Queue()
             drain_task = asyncio.create_task(_drain_sdk_messages(client, sdk_queue))
+            last_activity_at = time.monotonic()
+            waiting_for_user = False
 
             try:
                 while True:
@@ -315,6 +335,8 @@ class ClaudeOrchestrator:
                         q_event = _question_event_queue.get_nowait()
                         if q_event and q_event.get("type") == "ask_user_question":
                             session.pending_question = q_event
+                            waiting_for_user = True
+                            last_activity_at = time.monotonic()
                             yield builder.build_question(
                                 q_event.get("question", ""),
                                 question_id=q_event.get("question_id"),
@@ -329,10 +351,19 @@ class ClaudeOrchestrator:
                     try:
                         message = await asyncio.wait_for(sdk_queue.get(), timeout=0.3)
                     except asyncio.TimeoutError:
+                        if (
+                            not waiting_for_user
+                            and time.monotonic() - last_activity_at > _SDK_IDLE_TIMEOUT_SECONDS
+                        ):
+                            yield builder.build_error("Agent 长时间没有返回响应，请稍后重试。")
+                            break
                         continue
 
                     if message is None:
                         break
+
+                    waiting_for_user = False
+                    last_activity_at = time.monotonic()
 
                     if isinstance(message, dict) and "_error" in message:
                         yield builder.build_error(message["_error"])
@@ -420,7 +451,10 @@ class ClaudeOrchestrator:
 
         except Exception as e:
             log.exception("ClaudeOrchestrator chat error")
-            yield builder.build_error(f"Agent 调用失败: {e}")
+            if isinstance(e, asyncio.TimeoutError):
+                yield builder.build_error("Agent 连接或发送请求超时，请检查 Claude/Anthropic 配置后重试。")
+            else:
+                yield builder.build_error(f"Agent 调用失败: {e}")
             yield builder.build_status("idle")
             yield builder.build_done()
 

@@ -59,6 +59,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   poll_multiple_tasks: "agent_tool_poll_multiple_tasks",
   save_chapter: "agent_tool_save_chapter",
   ask_user: "agent_tool_ask_user",
+  agent_connect: "agent_tool_agent_connect",
+  agent_query: "agent_tool_agent_query",
 };
 
 function AiAssistantMark({ className = "" }: { className?: string }) {
@@ -239,6 +241,8 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         setStatus(s);
         if (s === "waiting_for_user") {
           setIsLoading(false);
+        } else if (s === "idle") {
+          setIsLoading(false);
         }
       },
       onDone: () => {
@@ -247,7 +251,14 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         setAgentSteps((prev) => [...prev, { step_type: "finish" as const, is_parallel: false, ts: Date.now() }]);
         setIsLoading(false);
       },
-      onError: (data: any) => { setMessages((prev) => [...prev, { id: generateId(), role: "error", content: data.message, timestamp: Date.now() }]); setIsLoading(false); },
+      onError: (data: any) => {
+        const currentAid = activeAssistantIdRef.current;
+        setMessages((prev) => [
+          ...prev.map((m) => m.id === currentAid ? { ...m, isStreaming: false } : m),
+          { id: generateId(), role: "error", content: data.message, timestamp: Date.now() },
+        ]);
+        setIsLoading(false);
+      },
     };
   }, []);
 

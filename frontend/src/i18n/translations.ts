@@ -1024,6 +1024,8 @@ export const translations: Record<Language, Record<string, string>> = {
     agent_tool_save_chapter: "保存章节",
     agent_tool_delete_chapter: "删除章节",
     agent_tool_ask_user: "询问用户",
+    agent_tool_agent_connect: "连接 AI 总指挥",
+    agent_tool_agent_query: "发送请求",
   },
   en: {
     app_name: "InkMind",
@@ -2042,5 +2044,7 @@ export const translations: Record<Language, Record<string, string>> = {
     agent_tool_save_chapter: "Save chapter",
     agent_tool_delete_chapter: "Delete chapter",
     agent_tool_ask_user: "Ask user",
+    agent_tool_agent_connect: "Connect AI director",
+    agent_tool_agent_query: "Send request",
   },
 };
