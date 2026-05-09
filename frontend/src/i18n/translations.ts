@@ -1026,6 +1026,9 @@ export const translations: Record<Language, Record<string, string>> = {
     agent_tool_ask_user: "询问用户",
     agent_tool_agent_connect: "连接 AI 总指挥",
     agent_tool_agent_query: "发送请求",
+    agent_steps_title: "工具调用",
+    agent_steps_running: "{count} 个进行中",
+    agent_steps_done: "共 {count} 次",
   },
   en: {
     app_name: "InkMind",
@@ -2046,5 +2049,8 @@ export const translations: Record<Language, Record<string, string>> = {
     agent_tool_ask_user: "Ask user",
     agent_tool_agent_connect: "Connect AI director",
     agent_tool_agent_query: "Send request",
+    agent_steps_title: "Tool calls",
+    agent_steps_running: "{count} running",
+    agent_steps_done: "{count} total",
   },
 };

@@ -5448,10 +5448,10 @@ select {
 
 
 .agent-steps-container {
-  padding: 8px 18px;
+  padding: 8px 14px;
   border-bottom: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 70%, transparent);
-  max-height: 140px;
-  overflow-y: auto;
+  max-height: 172px;
+  overflow: hidden;
   flex-shrink: 0;
   background: color-mix(in oklab, var(--card, #efe9de) 28%, transparent);
 }
@@ -5552,10 +5552,11 @@ select {
   line-height: 1.72;
   word-break: break-word;
   font-family: var(--font-ui);
+  padding: 1px 0 4px;
 }
 
 .agent-message-body p {
-  margin: 0 0 0.6em;
+  margin: 0 0 0.72em;
 }
 
 .agent-message-body p:last-child {
@@ -5566,7 +5567,7 @@ select {
 .agent-message-body h2,
 .agent-message-body h3,
 .agent-message-body h4 {
-  margin: 1em 0 0.4em;
+  margin: 1.05em 0 0.45em;
   font-weight: 600;
   line-height: 1.4;
   color: var(--ink, #141413);
@@ -5583,12 +5584,12 @@ select {
 
 .agent-message-body ul,
 .agent-message-body ol {
-  margin: 0.4em 0;
+  margin: 0.45em 0 0.75em;
   padding-left: 1.5em;
 }
 
 .agent-message-body li {
-  margin: 0.2em 0;
+  margin: 0.22em 0;
   line-height: 1.65;
 }
 
@@ -5597,8 +5598,8 @@ select {
 }
 
 .agent-message-body blockquote {
-  margin: 0.6em 0;
-  padding: 0.4em 1em;
+  margin: 0.7em 0;
+  padding: 0.5em 1em;
   border-left: 2px solid var(--accent, #cc785c);
   background: color-mix(in oklab, var(--accent, #cc785c) 4%, transparent);
   border-radius: 0 4px 4px 0;
@@ -5628,6 +5629,14 @@ select {
   line-height: 1.6;
 }
 
+.agent-message-body > :first-child {
+  margin-top: 0;
+}
+
+.agent-message-body > :last-child {
+  margin-bottom: 0;
+}
+
 .agent-message-body pre code {
   background: transparent;
   padding: 0;
@@ -5652,9 +5661,12 @@ select {
 
 .agent-message-body table {
   border-collapse: collapse;
-  margin: 0.6em 0;
+  margin: 0.8em 0;
   font-size: 0.88em;
   width: 100%;
+  display: block;
+  overflow-x: auto;
+  border-radius: 8px;
 }
 
 .agent-message-body th,
@@ -6488,18 +6500,92 @@ select {
 }
 
 .ai-assistant-agent-steps {
-  padding: 4px 0;
+  padding: 0;
+}
+
+.ai-assistant-agent-steps__header {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #6c6a64);
+  font-family: var(--font-ui);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ai-assistant-agent-steps__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink, #141413);
+}
+
+.ai-assistant-agent-steps__meta {
+  font-size: 11px;
+  color: var(--muted, #6c6a64);
+}
+
+.ai-assistant-agent-steps__chevron {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted, #6c6a64);
+  transition: transform 0.15s ease;
+}
+
+.ai-assistant-agent-steps__chevron.is-collapsed {
+  transform: rotate(180deg);
+}
+
+.ai-assistant-agent-steps__list {
+  max-height: 128px;
+  overflow-y: auto;
+  padding: 2px 2px 4px;
+}
+
+.ai-assistant-agent-steps__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 2px 6px;
+}
+
+.ai-assistant-agent-steps__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--canvas, #faf9f5) 80%, transparent);
+  color: var(--muted, #6c6a64);
+  font-size: 11px;
+  font-family: var(--font-ui);
+}
+
+.ai-assistant-agent-steps__chip--running {
+  color: var(--accent, #cc785c);
+  background: color-mix(in oklab, var(--accent, #cc785c) 9%, transparent);
 }
 
 .ai-assistant-agent-step {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 0;
+  gap: 7px;
+  min-height: 24px;
+  padding: 3px 6px;
+  border-radius: 6px;
   font-size: 12px;
   color: var(--muted, #6c6a64);
   position: relative;
   font-family: var(--font-ui);
+}
+
+.ai-assistant-agent-step:hover {
+  background: color-mix(in oklab, var(--ink, #141413) 3%, transparent);
 }
 
 .ai-assistant-agent-step--running {
@@ -6532,6 +6618,21 @@ select {
 .ai-assistant-agent-step__label {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-assistant-agent-step__count {
+  flex-shrink: 0;
+  min-width: 24px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent, #cc785c) 10%, transparent);
+  color: var(--accent, #cc785c);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
 }
 
 .ai-assistant-agent-step__result {

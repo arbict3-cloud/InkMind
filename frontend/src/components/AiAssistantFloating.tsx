@@ -48,21 +48,6 @@ function saveJson(key: string, value: unknown): void {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
 }
 
-const TOOL_DISPLAY_NAMES: Record<string, string> = {
-  get_novel_state: "agent_tool_get_novel_state",
-  get_chapters: "agent_tool_get_chapters",
-  get_chapter_detail: "agent_tool_get_chapter_detail",
-  get_characters: "agent_tool_get_characters",
-  get_memos: "agent_tool_get_memos",
-  dispatch_generation_task: "agent_tool_dispatch_generation_task",
-  poll_task_result: "agent_tool_poll_task_result",
-  poll_multiple_tasks: "agent_tool_poll_multiple_tasks",
-  save_chapter: "agent_tool_save_chapter",
-  ask_user: "agent_tool_ask_user",
-  agent_connect: "agent_tool_agent_connect",
-  agent_query: "agent_tool_agent_query",
-};
-
 function AiAssistantMark({ className = "" }: { className?: string }) {
   return (
     <span className={`ai-assistant-mark ${className}`} aria-hidden="true">
@@ -325,13 +310,6 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     }
   }, [session, pendingQuestion, novelId]);
 
-  const getToolDisplayName = (name: string) => {
-    const key = TOOL_DISPLAY_NAMES[name];
-    return key ? t(key) : name;
-  };
-
-  const displaySteps = agentSteps.map((s) => ({ ...s, tool_name: s.tool_name ? getToolDisplayName(s.tool_name) : s.tool_name }));
-
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }, [handleSend]);
@@ -373,9 +351,9 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
             <button type="button" className="ai-assistant-header__close" onClick={() => setIsOpen(false)}>×</button>
           </div>
 
-          {displaySteps.length > 0 && (
+          {agentSteps.length > 0 && (
             <div className="agent-steps-container">
-              <AgentStepDisplay steps={displaySteps} />
+              <AgentStepDisplay steps={agentSteps} />
             </div>
           )}
 
@@ -386,7 +364,11 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
                 <p className="agent-welcome__text">{t("smart_writer_welcome")}</p>
               </div>
             )}
-            {messages.map((msg) => (
+            {messages.map((msg) => {
+              if (msg.role === "assistant" && msg.isStreaming && !msg.content.trim()) {
+                return null;
+              }
+              return (
               <div key={msg.id} className={`agent-message agent-message-${msg.role}`}>
                 {msg.role === "user" ? (
                   <div className="agent-message-content agent-message-content--user">{msg.content}</div>
@@ -399,12 +381,13 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
                     </div>
                     <div className="agent-message-body">
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      {msg.isStreaming && <span className="agent-cursor">▊</span>}
+                      {msg.isStreaming && msg.content.trim() && <span className="agent-cursor">▊</span>}
                     </div>
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
 

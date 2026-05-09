@@ -213,6 +213,46 @@ async def _drain_sdk_messages(
         await output_queue.put(None)
 
 
+def _tool_result_text(content: Any) -> str:
+    """Extract text from SDK tool result blocks across SDK/MCP shapes."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+        nested = content.get("content")
+        if nested is not None:
+            return _tool_result_text(nested)
+        return ""
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            text = _tool_result_text(item)
+            if text:
+                parts.append(text)
+        return "\n".join(parts)
+    text = getattr(content, "text", None)
+    if isinstance(text, str):
+        return text
+    nested = getattr(content, "content", None)
+    if nested is not None:
+        return _tool_result_text(nested)
+    return ""
+
+
+def _parse_tool_json(text: str) -> dict[str, Any] | None:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
 async def _pre_tool_use_hook(
     input_data: Any,
     tool_use_id: str | None,
@@ -393,17 +433,13 @@ class ClaudeOrchestrator:
                             for block in message.content:
                                 if isinstance(block, ToolResultBlock):
                                     tool_use_id = block.tool_use_id
-                                    preview = ""
-                                    if block.content:
-                                        for c in block.content:
-                                            if hasattr(c, "text"):
-                                                preview = c.text[:200]
-                                                break
+                                    result_text = _tool_result_text(block.content)
+                                    preview = result_text[:200] if result_text else ""
 
                                     tracked_tool = pending_tool_calls.pop(tool_use_id, None)
                                     if tracked_tool and "save_chapter" in tracked_tool and preview:
                                         try:
-                                            result_data = json.loads(preview)
+                                            result_data = _parse_tool_json(result_text)
                                             if result_data.get("success"):
                                                 yield builder.build_chapter_saved(
                                                     chapter_id=result_data["chapter_id"],
@@ -411,19 +447,19 @@ class ClaudeOrchestrator:
                                                     novel_id=session.novel_id,
                                                     word_count=result_data.get("word_count", 0),
                                                 )
-                                        except (json.JSONDecodeError, KeyError):
+                                        except (AttributeError, KeyError):
                                             pass
 
                                     if tracked_tool and "delete_chapter" in tracked_tool and preview:
                                         try:
-                                            result_data = json.loads(preview)
+                                            result_data = _parse_tool_json(result_text)
                                             if result_data.get("success"):
                                                 yield builder.build_chapter_deleted(
                                                     chapter_id=result_data["chapter_id"],
                                                     title=result_data.get("title", ""),
                                                     novel_id=session.novel_id,
                                                 )
-                                        except (json.JSONDecodeError, KeyError):
+                                        except (AttributeError, KeyError):
                                             pass
 
                                     result_tool_name = tracked_tool or f"tool_{tool_use_id[:8]}"
