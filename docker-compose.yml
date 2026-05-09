@@ -1,0 +1,31 @@
+services:
+  backend:
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-inkmind}-backend:${DOCKER_IMAGE_TAG:-latest}
+    build:
+      context: ./backend
+    container_name: inkmind-backend
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - inkmind-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-inkmind}-frontend:${DOCKER_IMAGE_TAG:-latest}
+    build:
+      context: ./frontend
+    container_name: inkmind-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  inkmind-data:
