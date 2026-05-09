@@ -24,10 +24,9 @@ from app.agent.task_queue import AgentTask, AgentTaskQueue, get_task_queue
 from app.config import settings
 from app.language import Language
 from app.llm.base import LLMProvider
-from app.llm.metered_llm import LLMUsageAccumulator
 from app.llm.providers import get_llm, resolve_llm_for_user
 from app.llm.ndjson_stream import filter_think_chunks
-from app.models import Chapter, Character, Novel
+from app.models import Chapter, Character, Novel, User
 from app.prompts import get_prompt
 
 log = logging.getLogger(__name__)
@@ -53,9 +52,7 @@ def _strip_code_fence(raw: str) -> str:
     return s.strip()
 
 
-def _resolve_sub_agent_llm(
-    explicit_provider: str | None = None,
-) -> LLMProvider:
+def _resolve_sub_agent_provider(explicit_provider: str | None = None) -> str:
     provider = explicit_provider or settings.default_llm_provider
     if provider in ("anthropic", "auto"):
         for fallback in ("qwen", "deepseek", "minimax", "openai"):
@@ -70,8 +67,7 @@ def _resolve_sub_agent_llm(
                 break
         else:
             provider = "openai"
-    return get_llm(provider)
-
+    return provider
 
 class SubAgentExecutor:
     """子智能体执行器。
@@ -79,10 +75,31 @@ class SubAgentExecutor:
     提供各种文本生成能力，由 ClaudeOrchestrator 通过 TaskQueue 调度。
     """
 
-    def __init__(self, db: Session, novel: Novel, language: Language = "zh") -> None:
+    def __init__(
+        self,
+        db: Session,
+        novel: Novel,
+        language: Language = "zh",
+        user_id: int | None = None,
+    ) -> None:
         self._db = db
         self._novel = novel
         self._language = language
+        self._user_id = user_id
+
+    def _resolve_llm(self, explicit_provider: str | None, action: str) -> LLMProvider:
+        provider = _resolve_sub_agent_provider(explicit_provider)
+        if self._user_id is None:
+            return get_llm(provider)
+        user = self._db.get(User, self._user_id)
+        if user is None:
+            return get_llm(provider)
+        return resolve_llm_for_user(
+            user,
+            provider,
+            db=self._db,
+            action=action,
+        )
 
     async def execute_generate_chapter(self, task: AgentTask) -> dict[str, Any]:
         params = task.params
@@ -91,7 +108,7 @@ class SubAgentExecutor:
         word_count = params.get("word_count")
         sub_provider = params.get("sub_agent_provider")
 
-        llm = _resolve_sub_agent_llm(sub_provider)
+        llm = self._resolve_llm(sub_provider, "AI助手生成章节")
         memory = NovelMemory(self._db, self._novel)
         context = memory.build_context(chapter_summary)
 
@@ -142,7 +159,7 @@ class SubAgentExecutor:
         chapter_content = params.get("chapter_content", "")
         chapter_title = params.get("chapter_title", "")
 
-        llm = _resolve_sub_agent_llm(params.get("sub_agent_provider"))
+        llm = self._resolve_llm(params.get("sub_agent_provider"), "AI助手生成摘要")
         system = get_prompt("summarize_body_system", self._language)
         title_display = chapter_title or get_prompt("common_none", self._language)
         user_msg = get_prompt(
@@ -160,7 +177,7 @@ class SubAgentExecutor:
         total_summary = params.get("total_summary", "")
         chapter_count = params.get("chapter_count", 1)
 
-        llm = _resolve_sub_agent_llm(params.get("sub_agent_provider"))
+        llm = self._resolve_llm(params.get("sub_agent_provider"), "AI助手批量规划")
         memory = NovelMemory(self._db, self._novel)
         context = memory.build_context(total_summary)
 
@@ -185,7 +202,7 @@ class SubAgentExecutor:
         if not chapter:
             return {"error": f"章节 {chapter_id} 不存在"}
 
-        llm = _resolve_sub_agent_llm(params.get("sub_agent_provider"))
+        llm = self._resolve_llm(params.get("sub_agent_provider"), "AI助手改写章节")
         from app.services.chapter_llm import revise_chapter_body
         revised = revise_chapter_body(llm, self._novel, chapter, instruction, language=self._language)
 
@@ -200,7 +217,7 @@ class SubAgentExecutor:
         if not chapter:
             return {"error": f"章节 {chapter_id} 不存在"}
 
-        llm = _resolve_sub_agent_llm(params.get("sub_agent_provider"))
+        llm = self._resolve_llm(params.get("sub_agent_provider"), "AI助手续写章节")
         from app.services.chapter_llm import append_chapter_body
         appended = append_chapter_body(llm, self._novel, chapter, instruction, language=self._language)
 
@@ -212,7 +229,7 @@ class SubAgentExecutor:
         description = params.get("description", "")
         hint = params.get("hint", "")
 
-        llm = _resolve_sub_agent_llm(params.get("sub_agent_provider"))
+        llm = self._resolve_llm(params.get("sub_agent_provider"), "AI助手命名")
         from app.schemas.ai import NovelNamingIn
         from app.services.novel_ai import novel_naming_suggest
         body = NovelNamingIn(
@@ -230,8 +247,9 @@ def register_sub_agent_handlers(
     db: Session,
     novel: Novel,
     language: Language = "zh",
+    user_id: int | None = None,
 ) -> SubAgentExecutor:
-    executor = SubAgentExecutor(db, novel, language)
+    executor = SubAgentExecutor(db, novel, language, user_id=user_id)
 
     queue.register_handler("generate_chapter", executor.execute_generate_chapter)
     queue.register_handler("generate_summary", executor.execute_generate_summary)

@@ -50,7 +50,9 @@ from app.agent.task_queue import get_task_queue
 from app.config import settings
 from app.database import SessionLocal
 from app.language import Language
+from app.llm.metered_llm import LLMUsageAccumulator
 from app.llm.sse_stream import SseEvent, SseStreamBuilder, sse_agent_step, sse_error
+from app.llm.token_counter import count_tokens
 from app.models import Novel, User
 
 log = logging.getLogger(__name__)
@@ -280,6 +282,14 @@ def _build_agent_options(novel_id: int, session_id: str = "") -> ClaudeAgentOpti
     return ClaudeAgentOptions(**options_kwargs)
 
 
+def _orchestrator_usage_provider() -> str:
+    if settings.anthropic_api_key:
+        return "anthropic"
+    if settings.deepseek_api_key:
+        return "deepseek"
+    return "anthropic"
+
+
 class ClaudeOrchestrator:
     """Claude 编排器。
 
@@ -299,7 +309,7 @@ class ClaudeOrchestrator:
         self._language = language
         self._queue = get_task_queue()
         register_sub_agent_handlers(
-            self._queue, db_session_factory(), novel, language
+            self._queue, db_session_factory(), novel, language, user_id=user.id
         )
 
     def create_session(self) -> OrchestratorSession:
@@ -314,6 +324,27 @@ class ClaudeOrchestrator:
 
     def get_session(self, session_id: str) -> OrchestratorSession | None:
         return _active_sessions.get(session_id)
+
+    def _record_orchestrator_usage(
+        self,
+        session: OrchestratorSession,
+        user_message: str,
+        assistant_text: str,
+    ) -> None:
+        provider = _orchestrator_usage_provider()
+        db = self._db_session_factory()
+        try:
+            accumulator = LLMUsageAccumulator(db, session.user_id, provider, "AI助手编排")
+            accumulator.accumulate(
+                count_tokens(f"{_ORCHESTRATOR_SYSTEM_PROMPT}\n{user_message}", provider),
+                count_tokens(assistant_text, provider),
+            )
+            accumulator.flush()
+        except Exception:
+            db.rollback()
+            log.exception("record orchestrator usage failed user_id=%s", session.user_id)
+        finally:
+            db.close()
 
     async def chat(
         self,
@@ -482,6 +513,7 @@ class ClaudeOrchestrator:
                 except asyncio.CancelledError:
                     pass
 
+            self._record_orchestrator_usage(session, user_message, full_text)
             yield builder.build_status("idle")
             yield builder.build_done()
 
