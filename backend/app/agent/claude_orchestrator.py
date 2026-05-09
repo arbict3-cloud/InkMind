@@ -295,7 +295,7 @@ def _build_agent_options(novel_id: int, session_id: str = "") -> ClaudeAgentOpti
         "system_prompt": _ORCHESTRATOR_SYSTEM_PROMPT,
         "mcp_servers": {"inkmind": mcp_server},
         "allowed_tools": ALL_TOOL_NAMES + ["AskUserQuestion"],
-        "disallowed_tools": ["Bash", "Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"],
+        "disallowed_tools": ["Edit", "Write", "MultiEdit", "NotebookEdit"],
         "permission_mode": settings.agent_permission_mode,
         "max_turns": settings.agent_max_turns,
         "can_use_tool": _can_use_tool,

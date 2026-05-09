@@ -23,7 +23,6 @@ import {
   ArrowLeftOutlined,
   SunOutlined,
   MoonOutlined,
-  EyeOutlined,
   GlobalOutlined,
 } from "@ant-design/icons";
 import { useAuth } from "@/context/AuthContext";
@@ -36,7 +35,7 @@ const { Title, Text } = Typography;
 
 export default function AdminLayout() {
   const { user, logout } = useAuth();
-  const { theme, setTheme, isDark, isSepia } = useTheme();
+  const { theme, setTheme, isDark } = useTheme();
   const { t, setLanguage, isZh } = useI18n();
   const nav = useNavigate();
   const { goBackSmart } = useNavigation();
@@ -72,11 +71,11 @@ export default function AdminLayout() {
   };
 
   const bgColor = isDark ? "#181715" : "#f5f0e8";
-  const headerBg = isDark ? "#1e1d1b" : isSepia ? "#faf9f5" : "#faf9f5";
-  const headerBorder = isDark ? "#2a2926" : isSepia ? "#d9cbb0" : "#e6dfd8";
-  const textColor = isDark ? "#e7e5e1" : isSepia ? "#4a392b" : "#141413";
-  const secondaryTextColor = isDark ? "#a3a19b" : isSepia ? "#8b7762" : "#6c6a64";
-  const menuBg = isDark ? "#1e1d1b" : isSepia ? "#faf9f5" : "#faf9f5";
+  const headerBg = isDark ? "#1e1d1b" : "#faf9f5";
+  const headerBorder = isDark ? "#2a2926" : "#e6dfd8";
+  const textColor = isDark ? "#e7e5e1" : "#141413";
+  const secondaryTextColor = isDark ? "#a3a19b" : "#6c6a64";
+  const menuBg = isDark ? "#1e1d1b" : "#faf9f5";
 
   const languageMenuItems = [
     {
@@ -90,30 +89,6 @@ export default function AdminLayout() {
       icon: <GlobalOutlined />,
       label: !isZh ? "✓ English" : "English",
       onClick: () => setLanguage("en"),
-    },
-  ];
-
-  const themeMenuItems = [
-    {
-      key: "light",
-      icon: <SunOutlined />,
-      label: t("theme_light"),
-      onClick: () => setTheme("light"),
-      disabled: theme === "light",
-    },
-    {
-      key: "sepia",
-      icon: <EyeOutlined />,
-      label: t("theme_sepia"),
-      onClick: () => setTheme("sepia"),
-      disabled: theme === "sepia",
-    },
-    {
-      key: "dark",
-      icon: <MoonOutlined />,
-      label: t("theme_dark"),
-      onClick: () => setTheme("dark"),
-      disabled: theme === "dark",
     },
   ];
 
@@ -157,12 +132,6 @@ export default function AdminLayout() {
       },
     },
   ];
-
-  const getThemeIcon = () => {
-    if (theme === "dark") return <MoonOutlined />;
-    if (theme === "sepia") return <EyeOutlined />;
-    return <SunOutlined />;
-  };
 
   return (
     <Layout
@@ -273,17 +242,17 @@ export default function AdminLayout() {
               </Button>
             </Dropdown>
 
-            <Dropdown menu={{ items: themeMenuItems }} placement="bottomRight">
-              <Button
-                type="text"
-                icon={getThemeIcon()}
-                size="large"
-                style={{
-                  color: textColor,
-                  transition: "color 0.3s ease",
-                }}
-              />
-            </Dropdown>
+            <Button
+              type="text"
+              icon={theme === "dark" ? <MoonOutlined /> : <SunOutlined />}
+              size="large"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label={theme === "dark" ? t("theme_light") : t("theme_dark")}
+              style={{
+                color: textColor,
+                transition: "color 0.3s ease",
+              }}
+            />
 
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
               <div

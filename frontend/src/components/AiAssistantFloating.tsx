@@ -27,12 +27,11 @@ export interface AiAssistantFloatingProps {
   onChapterSaved?: (chapter: Partial<Chapter> & { id: number; title: string }) => void;
 }
 
-const POSITION_KEY = "inkmind_ai_position";
-const DEFAULT_POSITION = { x: -16, y: 72 };
-const PANEL_SIZE_KEY = "inkmind_ai_panel_size";
-const DEFAULT_PANEL_SIZE = { width: 520, height: 780 };
-const MIN_PANEL_SIZE = { width: 340, height: 400 };
 const SESSION_KEY = "inkmind_agent_session";
+const PANEL_WIDTH_KEY = "inkmind_ai_panel_width";
+const DEFAULT_PANEL_WIDTH = 400;
+const MIN_PANEL_WIDTH = 340;
+const MAX_PANEL_WIDTH = 620;
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -48,6 +47,12 @@ function loadJson<T>(key: string, fallback: T): T {
 
 function saveJson(key: string, value: unknown): void {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
+function clampPanelWidth(width: number): number {
+  const viewportMax = typeof window === "undefined" ? MAX_PANEL_WIDTH : window.innerWidth - 120;
+  const maxWidth = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, viewportMax));
+  return Math.min(maxWidth, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
 }
 
 function stopStreamingMessages(messages: AgentMessage[]): AgentMessage[] {
@@ -92,17 +97,55 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const initializedRef = useRef(false);
   const activeAssistantIdRef = useRef<string>("");
-
-  const [position, setPosition] = useState(() => loadJson(POSITION_KEY, DEFAULT_POSITION));
-  const [panelSize, setPanelSize] = useState(() => loadJson(PANEL_SIZE_KEY, DEFAULT_PANEL_SIZE));
-  const [isDragging, setIsDragging] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
-  const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-  const resizeRef = useRef<{ x: number; y: number; w: number; h: number; px: number; py: number; corner: string } | null>(null);
+  const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [panelWidth, setPanelWidth] = useState(() => clampPanelWidth(loadJson(PANEL_WIDTH_KEY, DEFAULT_PANEL_WIDTH)));
+  const [isPanelResizing, setIsPanelResizing] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, agentSteps]);
+
+  useEffect(() => {
+    document.body.classList.toggle("ai-assistant-docked-open", isOpen);
+    return () => {
+      document.body.classList.remove("ai-assistant-docked-open");
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--ai-assistant-dock-width", `${panelWidth}px`);
+  }, [panelWidth]);
+
+  useEffect(() => {
+    document.body.classList.toggle("ai-assistant-is-resizing", isPanelResizing);
+    if (!isPanelResizing) return;
+
+    const handleMove = (event: PointerEvent) => {
+      if (!resizeRef.current) return;
+      const nextWidth = resizeRef.current.startWidth + resizeRef.current.startX - event.clientX;
+      setPanelWidth(clampPanelWidth(nextWidth));
+    };
+
+    const handleUp = () => {
+      setIsPanelResizing(false);
+      resizeRef.current = null;
+      setPanelWidth((current) => {
+        const next = clampPanelWidth(current);
+        saveJson(PANEL_WIDTH_KEY, next);
+        return next;
+      });
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      document.body.classList.remove("ai-assistant-is-resizing");
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [isPanelResizing]);
 
   useEffect(() => {
     if (!isOpen || !novelId || initializedRef.current) return;
@@ -129,85 +172,6 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setSession(null);
     try { localStorage.removeItem(`${SESSION_KEY}_${novelId}`); } catch { /* ignore */ }
   }, [novelId]);
-
-  const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
-    dragRef.current = { x: cx, y: cy, px: position.x, py: position.y };
-    setIsDragging(true);
-  }, [position]);
-
-  useEffect(() => {
-    if (!isDragging) return;
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      if (!dragRef.current) return;
-      const cx = "touches" in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
-      const cy = "touches" in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
-      const nx = Math.min(-16, Math.max(-(window.innerWidth - 100), dragRef.current.px + cx - dragRef.current.x));
-      const ny = Math.max(0, Math.min(window.innerHeight - 100, dragRef.current.py + cy - dragRef.current.y));
-      setPosition({ x: nx, y: ny });
-    };
-    const onUp = () => { setIsDragging(false); saveJson(POSITION_KEY, position); dragRef.current = null; };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    window.addEventListener("touchmove", onMove, { passive: false });
-    window.addEventListener("touchend", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
-  }, [isDragging, position]);
-
-  const handleResizeStart = useCallback((corner: string) => (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
-    resizeRef.current = { x: cx, y: cy, w: panelSize.width, h: panelSize.height, px: position.x, py: position.y, corner };
-    setIsResizing(true);
-  }, [panelSize, position]);
-
-  useEffect(() => {
-    if (!isResizing) return;
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      if (!resizeRef.current) return;
-      const cx = "touches" in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
-      const cy = "touches" in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
-      const ref = resizeRef.current;
-      const dx = cx - ref.x;
-      const dy = cy - ref.y;
-
-      let nw = ref.w;
-      let nh = ref.h;
-      let nx = ref.px;
-      let ny = ref.py;
-
-      if (ref.corner === "se") {
-        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w + dx));
-        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h + dy));
-        nx = ref.px + dx;
-      } else if (ref.corner === "sw") {
-        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w - dx));
-        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h + dy));
-      } else if (ref.corner === "ne") {
-        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w + dx));
-        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h - dy));
-        nx = ref.px + dx;
-        ny = ref.py + dy;
-      } else if (ref.corner === "nw") {
-        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w - dx));
-        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h - dy));
-        ny = ref.py + dy;
-      }
-
-      setPanelSize({ width: nw, height: nh });
-      setPosition({ x: nx, y: ny });
-    };
-    const onUp = () => { setIsResizing(false); saveJson(PANEL_SIZE_KEY, panelSize); saveJson(POSITION_KEY, position); resizeRef.current = null; };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    window.addEventListener("touchmove", onMove, { passive: false });
-    window.addEventListener("touchend", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
-  }, [isResizing, panelSize, position]);
 
   const buildChatHandlers = useCallback((aid: string) => {
     activeAssistantIdRef.current = aid;
@@ -356,16 +320,19 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [t]);
 
+  const handlePanelResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    resizeRef.current = { startX: event.clientX, startWidth: panelWidth };
+    setIsPanelResizing(true);
+  }, [panelWidth]);
+
   return (
     <>
       {!isOpen && (
         <button
           type="button"
           className="ai-assistant-float-btn"
-          style={{ right: `${Math.abs(position.x)}px`, top: `${position.y}px`, transform: isDragging ? "scale(1.05)" : undefined }}
           onClick={() => setIsOpen(true)}
-          onMouseDown={handleDragStart}
-          onTouchStart={handleDragStart}
           title={t("smart_writer_title")}
         >
           <AiAssistantMark />
@@ -374,17 +341,13 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       )}
 
       {isOpen && (
-        <div
-          className="ai-assistant-panel"
-          style={{
-            right: `${Math.abs(position.x)}px`,
-            top: `${position.y}px`,
-            width: `min(${panelSize.width}px, calc(100vw - 24px))`,
-            height: `min(${panelSize.height}px, calc(100vh - 24px))`,
-            maxHeight: "calc(100vh - 88px)",
-          }}
-        >
-          <div className="ai-assistant-header" onMouseDown={handleDragStart} onTouchStart={handleDragStart} style={{ cursor: "grab" }}>
+        <div className={`ai-assistant-panel ai-assistant-panel--docked${isPanelResizing ? " ai-assistant-panel--resizing" : ""}`}>
+          <div
+            className="ai-assistant-panel__width-handle"
+            onPointerDown={handlePanelResizeStart}
+            aria-hidden="true"
+          />
+          <div className="ai-assistant-header">
             <div className="ai-assistant-header__title">
               <AiAssistantMark className="ai-assistant-mark--header" />
               <span>{t("smart_writer_title")}</span>
@@ -487,26 +450,6 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
             </button>
           </div>
 
-          <div
-            className="ai-assistant-panel__resize ai-assistant-panel__resize--nw"
-            onMouseDown={handleResizeStart("nw")}
-            onTouchStart={handleResizeStart("nw")}
-          />
-          <div
-            className="ai-assistant-panel__resize ai-assistant-panel__resize--ne"
-            onMouseDown={handleResizeStart("ne")}
-            onTouchStart={handleResizeStart("ne")}
-          />
-          <div
-            className="ai-assistant-panel__resize ai-assistant-panel__resize--sw"
-            onMouseDown={handleResizeStart("sw")}
-            onTouchStart={handleResizeStart("sw")}
-          />
-          <div
-            className="ai-assistant-panel__resize ai-assistant-panel__resize--se"
-            onMouseDown={handleResizeStart("se")}
-            onTouchStart={handleResizeStart("se")}
-          />
         </div>
       )}
     </>

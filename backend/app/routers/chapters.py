@@ -815,7 +815,7 @@ def selection_ai(
     db: Annotated[Session, Depends(get_db)],
     language: Language,
 ):
-    """正文选区：扩写或润色（NDJSON 流 + 最终 text）。"""
+    """正文选区：改写、扩写、润色或续写（NDJSON 流 + 最终 text）。"""
     novel = _get_owned_novel(db, user.id, novel_id)
     available = list_available_providers()
     prov = (body.llm_provider or "").lower().strip() or None
@@ -836,11 +836,23 @@ def selection_ai(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="章节正文为空")
     _verify_unique_selection(body.chapter_content, body.selected_text)
 
-    change_type = "selection_expand" if body.mode == "expand" else "selection_polish"
+    change_type_map = {
+        "rewrite": "selection_rewrite",
+        "expand": "selection_expand",
+        "polish": "selection_polish",
+        "append": "selection_append",
+    }
+    change_type = change_type_map[body.mode]
 
     def gen():
         try:
-            llm = resolve_llm_for_user(user, body.llm_provider, db=db, action=("AI扩写" if body.mode == "expand" else "AI润色"))
+            action_map = {
+                "rewrite": "AI改写",
+                "expand": "AI扩写",
+                "polish": "AI润色",
+                "append": "AI续写",
+            }
+            llm = resolve_llm_for_user(user, body.llm_provider, db=db, action=action_map[body.mode])
         except ValueError as e:
             yield ndjson_line({"error": str(e)})
             return

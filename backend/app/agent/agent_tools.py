@@ -549,11 +549,16 @@ async def save_chapter(args: dict[str, Any]) -> dict[str, Any]:
     db.add(chapter)
     db.commit()
     db.refresh(chapter)
+    chapter_number = (
+        db.query(Chapter)
+        .filter(Chapter.novel_id == _novel_id, Chapter.sort_order <= chapter.sort_order)
+        .count()
+    )
 
     result = {
         "success": True,
         "chapter_id": chapter.id,
-        "chapter_number": sort_order,
+        "chapter_number": chapter_number,
         "title": chapter.title,
         "word_count": len(content),
     }

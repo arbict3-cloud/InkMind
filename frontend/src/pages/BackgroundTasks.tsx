@@ -33,7 +33,6 @@ import {
   BarChartOutlined,
   SunOutlined,
   MoonOutlined,
-  EyeOutlined,
   UserOutlined,
   SettingOutlined,
   HistoryOutlined,
@@ -63,7 +62,7 @@ interface TaskWithProgress extends BackgroundTask {
 
 export default function BackgroundTasksPage() {
   const { user, logout } = useAuth();
-  const { theme, setTheme, isDark, isSepia } = useTheme();
+  const { theme, setTheme, isDark } = useTheme();
   const { t, setLanguage, isZh } = useI18n();
   const nav = useNavigate();
   const { goBackSmart } = useNavigation();
@@ -202,30 +201,6 @@ export default function BackgroundTasksPage() {
     },
   ];
 
-  const themeMenuItems = [
-    {
-      key: "light",
-      icon: <SunOutlined />,
-      label: t("theme_light"),
-      onClick: () => setTheme("light"),
-      disabled: theme === "light",
-    },
-    {
-      key: "sepia",
-      icon: <EyeOutlined />,
-      label: t("theme_sepia"),
-      onClick: () => setTheme("sepia"),
-      disabled: theme === "sepia",
-    },
-    {
-      key: "dark",
-      icon: <MoonOutlined />,
-      label: t("theme_dark"),
-      onClick: () => setTheme("dark"),
-      disabled: theme === "dark",
-    },
-  ];
-
   const userMenuItems = [
     ...(user?.is_admin
       ? [
@@ -268,25 +243,17 @@ export default function BackgroundTasksPage() {
     },
   ];
 
-  const bgColor = isDark ? "#181715" : isSepia ? "#f5eddd" : "#f5f0e8";
+  const bgColor = isDark ? "#181715" : "#f5f0e8";
   const bgLinear = isDark ? "linear-gradient(180deg, #1e1d1b 0%, #181715 35%)" : 
-                      isSepia ? "linear-gradient(180deg, #efe2c9 0%, #f5eddd 35%)" : 
                       "linear-gradient(180deg, #e6dfd8 0%, #f5f0e8 35%)";
   const bgRadial = isDark ? "none" : 
-                     isSepia ? "radial-gradient(ellipse 120% 80% at 50% -20%, #faf9f5 0%, transparent 55%)" :
                      "radial-gradient(ellipse 120% 80% at 50% -20%, #faf9f5 0%, transparent 55%)";
-  const headerBg = isDark ? "#1e1d1b" : isSepia ? "#faf9f5" : "#faf9f5";
-  const headerBorder = isDark ? "#2a2926" : isSepia ? "#d9cbb0" : "#e6dfd8";
-  const textColor = isDark ? "#e7e5e1" : isSepia ? "#4a392b" : "#141413";
-  const cardBg = isDark ? "#1e1d1b" : isSepia ? "#faf9f5" : "#faf9f5";
+  const headerBg = isDark ? "#1e1d1b" : "#faf9f5";
+  const headerBorder = isDark ? "#2a2926" : "#e6dfd8";
+  const textColor = isDark ? "#e7e5e1" : "#141413";
+  const cardBg = isDark ? "#1e1d1b" : "#faf9f5";
   const primaryColor = "#cc785c";
-  const secondaryTextColor = isDark ? "#a3a19b" : isSepia ? "#8b7762" : "#6c6a64";
-
-  const getThemeIcon = () => {
-    if (theme === "dark") return <MoonOutlined />;
-    if (theme === "sepia") return <EyeOutlined />;
-    return <SunOutlined />;
-  };
+  const secondaryTextColor = isDark ? "#a3a19b" : "#6c6a64";
 
   const handleCancel = async (taskId: number) => {
     try {
@@ -533,17 +500,17 @@ export default function BackgroundTasksPage() {
             </Button>
           </Dropdown>
 
-          <Dropdown menu={{ items: themeMenuItems }} placement="bottomRight">
-            <Button
-              type="text"
-              icon={getThemeIcon()}
-              size="large"
-              style={{
-                color: textColor,
-                transition: "color 0.3s ease",
-              }}
-            />
-          </Dropdown>
+          <Button
+            type="text"
+            icon={theme === "dark" ? <MoonOutlined /> : <SunOutlined />}
+            size="large"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            aria-label={theme === "dark" ? t("theme_light") : t("theme_dark")}
+            style={{
+              color: textColor,
+              transition: "color 0.3s ease",
+            }}
+          />
 
           <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
             <div

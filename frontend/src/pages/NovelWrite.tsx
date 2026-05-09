@@ -9,6 +9,8 @@ import {
   createBatchBackgroundTask,
   deleteChapter,
   chapterSelectionAi,
+  createCharacter,
+  createMemo,
   evaluateChapter,
   fetchChapterVersions,
   fetchChapters,
@@ -31,17 +33,9 @@ import { normalizeBodyParagraphIndent } from "@/utils/bodyParagraphIndent";
 import { getCaretViewportPoint } from "@/utils/textareaCaretViewport";
 
 type AiTool = "generate" | "rewrite" | "append" | "naming" | "evaluate" | "versions";
+type SelectionAiMode = "rewrite" | "expand" | "polish" | "append";
 
 type GenerateTab = "single" | "batch";
-
-const RAIL_ITEM_KEYS: { key: AiTool; labelKey: string }[] = [
-  { key: "generate", labelKey: "write_tool_generate" },
-  { key: "rewrite", labelKey: "write_tool_rewrite" },
-  { key: "append", labelKey: "write_tool_append" },
-  { key: "naming", labelKey: "write_tool_naming" },
-  { key: "evaluate", labelKey: "write_tool_evaluate" },
-  { key: "versions", labelKey: "write_tool_versions" },
-];
 
 type LineHeightId = "compact" | "normal" | "relaxed" | "loose";
 
@@ -212,11 +206,6 @@ export default function NovelWrite() {
   const { theme } = useTheme();
   const { t } = useI18n();
 
-  const RAIL_ITEMS = useMemo(
-    () => RAIL_ITEM_KEYS.map(({ key, labelKey }) => ({ key, line2: t(labelKey) })),
-    [t]
-  );
-
   const LINE_HEIGHTS = useMemo(
     () => LINE_HEIGHT_IDS.map((id) => ({ id, label: t(LINE_HEIGHT_LABEL_KEYS[id]), value: LINE_HEIGHT_VALUES[id] })),
     [t]
@@ -289,7 +278,7 @@ export default function NovelWrite() {
   /** 正文选区：用于 AI 扩写/润色 */
   const [selectionRange, setSelectionRange] = useState<{ start: number; end: number } | null>(null);
   const [selectionPanel, setSelectionPanel] = useState<{
-    mode: "expand" | "polish";
+    mode: SelectionAiMode;
     start: number;
     end: number;
     text: string;
@@ -599,11 +588,11 @@ export default function NovelWrite() {
   }, [activeId, chapters]);
 
   useEffect(() => {
-    if (!busy || rightTool !== "generate") return;
+    if (!busy) return;
     const el = bodyTextareaRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [content, busy, rightTool]);
+  }, [content, busy]);
 
   const hasBody = (content || "").trim().length > 0;
   const hasLlm = llmOptions.length > 0;
@@ -631,7 +620,7 @@ export default function NovelWrite() {
   }, [selectionPanel]);
 
   async function runSelectionAi(
-    mode: "expand" | "polish",
+    mode: SelectionAiMode,
     rangeOverride?: { start: number; end: number }
   ) {
     const r = rangeOverride ?? selectionRange ?? captureSelection();
@@ -682,10 +671,57 @@ export default function NovelWrite() {
   function applySelectionReplace() {
     if (!selectionPanel || !selectionPanel.text.trim()) return;
     const { start, end, text } = selectionPanel;
-    setContent((c) => normalizeBodyParagraphIndent(c.slice(0, start) + text + c.slice(end)));
+    setContent((c) => {
+      const insertion = selectionPanel.mode === "append"
+        ? c.slice(0, end) + "\n\n" + text + c.slice(end)
+        : c.slice(0, start) + text + c.slice(end);
+      return normalizeBodyParagraphIndent(insertion);
+    });
     setSelectionPanel(null);
     setSelectionRange(null);
     setSelectionMenuPos(null);
+  }
+
+  async function addSelectionToCharacter() {
+    const r = selectionRange ?? captureSelection();
+    if (!r || activeId === null) return;
+    const selected = content.slice(r.start, r.end).trim();
+    if (!selected) {
+      setErr(t("write_err_select_text"));
+      return;
+    }
+    const firstLine = selected.split(/\s|\n|，|。|,|\./).find(Boolean) || selected.slice(0, 16);
+    try {
+      await createCharacter(id, {
+        name: firstLine.slice(0, 24),
+        profile: selected,
+        notes: t("write_selection_from_chapter").replace("{title}", title || t("common_untitled")),
+      });
+      setSelectionRange(null);
+      setSelectionMenuPos(null);
+    } catch (e) {
+      setErr(apiErrorMessage(e));
+    }
+  }
+
+  async function addSelectionToMemo() {
+    const r = selectionRange ?? captureSelection();
+    if (!r || activeId === null) return;
+    const selected = content.slice(r.start, r.end).trim();
+    if (!selected) {
+      setErr(t("write_err_select_text"));
+      return;
+    }
+    try {
+      await createMemo(id, {
+        title: selected.slice(0, 24) || t("write_selection_memo_title"),
+        body: selected,
+      });
+      setSelectionRange(null);
+      setSelectionMenuPos(null);
+    } catch (e) {
+      setErr(apiErrorMessage(e));
+    }
   }
 
   async function copySelectionResult() {
@@ -791,19 +827,6 @@ export default function NovelWrite() {
     };
   }, [showSelectionBar, selectionRange, content, bodyFontSizePx]);
 
-  function needsChapter(tool: AiTool): boolean {
-    return tool === "generate" || tool === "rewrite" || tool === "append" || tool === "evaluate" || tool === "versions";
-  }
-
-  function canOpenTool(tool: AiTool): boolean {
-    if (tool === "versions") {
-      return activeId !== null;
-    }
-    if (!hasLlm) return false;
-    if (needsChapter(tool)) return activeId !== null;
-    return true;
-  }
-
   async function flushSave(): Promise<void> {
     if (debounceTimerRef.current !== null) {
       clearTimeout(debounceTimerRef.current);
@@ -875,9 +898,9 @@ export default function NovelWrite() {
     };
   }, [title, summary, content, activeId, id, chapters, isPreviewMode]);
 
-  function toggleTool(t: AiTool) {
-    if (!canOpenTool(t)) return;
-    setRightTool((prev) => (prev === t ? null : t));
+  function toggleVersionsPanel() {
+    if (activeId === null) return;
+    setRightTool((prev) => (prev === "versions" ? null : "versions"));
     setErr("");
   }
 
@@ -1410,8 +1433,7 @@ export default function NovelWrite() {
     return <p className="muted">{t("write_loading_chapters")}</p>;
   }
 
-  const drawerOpen =
-    rightTool && hasLlm && (activeId !== null || rightTool === "naming");
+  const drawerOpen = Boolean(rightTool && activeId !== null);
 
   return (
     <div className={`write-shell write-theme--${theme}${focusMode ? " write-focus-mode" : ""}`}>
@@ -1678,6 +1700,26 @@ export default function NovelWrite() {
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder={t("write_chapter_title_placeholder")}
                   />
+                  {!focusMode ? (
+                    <div className="write-chapter-actions" aria-label={t("write_chapter_actions")}>
+                      <button
+                        type="button"
+                        className="write-chapter-action"
+                        disabled={!hasLlm || evaluateBusy || busy || !activeId}
+                        onClick={() => void onRunEvaluate()}
+                      >
+                        {evaluateBusy ? t("write_evaluating") : t("write_tool_evaluate")}
+                      </button>
+                      <button
+                        type="button"
+                        className={`write-chapter-action${rightTool === "versions" ? " is-active" : ""}`}
+                        disabled={!activeId}
+                        onClick={toggleVersionsPanel}
+                      >
+                        {t("write_tool_versions")}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className={`write-body-wrapper write-body-wrapper--${lineWidthId}`}>
                   <div className="field write-body-field">
@@ -1695,6 +1737,83 @@ export default function NovelWrite() {
                     />
                   </div>
                 </div>
+                {selectionPanel ? (
+                  <div className="write-inline-result" role="status">
+                    <div className="write-inline-result__head">
+                      <span>
+                        {selectionPanel.mode === "rewrite" && t("write_selection_rewrite_title")}
+                        {selectionPanel.mode === "expand" && t("write_selection_expand_title")}
+                        {selectionPanel.mode === "polish" && t("write_selection_polish_title")}
+                        {selectionPanel.mode === "append" && t("write_selection_append_title")}
+                      </span>
+                      <button type="button" className="write-inline-result__close" onClick={closeSelectionPanel}>
+                        {t("write_selection_exit")}
+                      </button>
+                    </div>
+                    <div className="write-inline-result__body">
+                      {selectionPanel.streaming || (busy ? t("write_generating") : "")}
+                    </div>
+                    <div className="write-inline-result__actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={busy || !selectionPanel.text.trim()}
+                        onClick={applySelectionReplace}
+                      >
+                        {selectionPanel.mode === "append" ? t("write_selection_insert") : t("write_selection_replace")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        disabled={busy || !selectionPanel.text.trim()}
+                        onClick={() => void copySelectionResult()}
+                      >
+                        {t("write_selection_copy")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        disabled={busy}
+                        onClick={() =>
+                          void runSelectionAi(selectionPanel.mode, {
+                            start: selectionPanel.start,
+                            end: selectionPanel.end,
+                          })
+                        }
+                      >
+                        {t("write_selection_regenerate")}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {evaluateResult ? (
+                  <div className="write-inline-result write-inline-result--eval">
+                    <div className="write-inline-result__head">
+                      <span>{t("write_evaluate_chapter")}</span>
+                      <button type="button" className="write-inline-result__close" onClick={() => setEvaluateResult(null)}>
+                        {t("write_close")}
+                      </button>
+                    </div>
+                    <div className="write-eval-score" aria-label={t("write_deai_score_aria")}>
+                      <span className="write-eval-score-num">{evaluateResult.de_ai_score}</span>
+                      <span className="write-eval-score-denom">/ 100</span>
+                      <span className="muted write-eval-score-label">{t("write_deai_score_desc")}</span>
+                    </div>
+                    {evaluateResult.issues.length > 0 ? (
+                      <ul className="write-eval-issues">
+                        {evaluateResult.issues.map((it, i) => (
+                          <li key={i}>
+                            <strong>{it.aspect}</strong>
+                            <span className="muted">{t("write_eval_issue_separator")}</span>
+                            {it.detail}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="muted">{t("write_evaluate_no_issues")}</p>
+                    )}
+                  </div>
+                ) : null}
                 <div className="write-editor-footer">
                   <div className="write-word-stats">
                     <span className="write-word-stat-item">
@@ -1730,34 +1849,8 @@ export default function NovelWrite() {
         </div>
       </div>
 
-      {!focusMode && (
-        <nav className="write-ai-rail" aria-label={t("write_ai_features")}>
-          {RAIL_ITEMS.map(({ key, line2 }) => (
-            <button
-              key={key}
-              type="button"
-              className={`write-rail-btn${rightTool === key ? " active" : ""}`}
-              disabled={!canOpenTool(key)}
-              title={
-                !hasLlm
-                  ? t("write_err_no_llm")
-                  : needsChapter(key) && !activeId
-                    ? t("write_please_select_chapter")
-                    : `AI${line2}`
-              }
-              onClick={() => toggleTool(key)}
-            >
-              <span className="write-rail-stack">
-                <span className="write-rail-ai">AI</span>
-                <span className="write-rail-name">{line2}</span>
-              </span>
-            </button>
-          ))}
-        </nav>
-      )}
-
       {!focusMode && drawerOpen && rightTool && (
-        <div className="write-ai-drawer">
+        <div className="write-ai-drawer write-version-panel">
           <div className="write-ai-drawer-head">
             <span>
               {rightTool === "generate" && t("write_ai_generate")}
@@ -2298,8 +2391,10 @@ export default function NovelWrite() {
                                     {v.change_type === "ai_generate" && t("write_change_ai_gen")}
                                     {v.change_type === "ai_rewrite" && t("write_change_ai_rewrite")}
                                     {v.change_type === "ai_append" && t("write_change_ai_append")}
+                                    {v.change_type === "selection_rewrite" && t("write_change_ai_rewrite")}
                                     {v.change_type === "selection_expand" && t("write_change_ai_expand")}
                                     {v.change_type === "selection_polish" && t("write_change_ai_polish")}
+                                    {v.change_type === "selection_append" && t("write_change_ai_append")}
                                     {v.change_type === "rollback" && t("write_change_rollback")}
                                   </span>
                                 </div>
@@ -2431,14 +2526,17 @@ export default function NovelWrite() {
             className="write-selection-float__item"
             disabled={busy}
             onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void runSelectionAi("rewrite")}
+          >
+            {t("write_selection_rewrite")}
+          </button>
+          <button
+            type="button"
+            className="write-selection-float__item"
+            disabled={busy}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => void runSelectionAi("expand")}
           >
-            <svg className="write-selection-float__icon" viewBox="0 0 24 24" aria-hidden>
-              <path
-                fill="currentColor"
-                d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
-              />
-            </svg>
             {t("write_selection_expand")}
           </button>
           <button
@@ -2448,92 +2546,35 @@ export default function NovelWrite() {
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => void runSelectionAi("polish")}
           >
-            <svg
-              className="write-selection-float__icon write-selection-float__icon--stroke"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.75"
-              aria-hidden
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"
-              />
-            </svg>
             {t("write_selection_polish")}
           </button>
-        </div>
-      )}
-
-      {selectionPanel && (
-        <div
-          className="write-selection-overlay"
-          role="presentation"
-          onClick={closeSelectionPanel}
-        >
-          <div
-            className="write-selection-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="write-selection-card-title"
-            onClick={(e) => e.stopPropagation()}
+          <button
+            type="button"
+            className="write-selection-float__item"
+            disabled={busy}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void runSelectionAi("append")}
           >
-            <h2 id="write-selection-card-title" className="write-selection-card__title">
-              {selectionPanel.mode === "expand" ? t("write_selection_expand_title") : t("write_selection_polish_title")}
-            </h2>
-            <div className="write-selection-card__body">
-              {selectionPanel.streaming || (busy ? t("write_generating") : "")}
-            </div>
-            <p className="write-selection-card__disclaimer">
-              {t("write_selection_disclaimer")}
-            </p>
-            <div className="write-selection-card__actions">
-              <button
-                type="button"
-                className="btn btn-primary write-selection-card__replace"
-                disabled={busy || !selectionPanel.text.trim()}
-                onClick={applySelectionReplace}
-              >
-                {t("write_selection_replace")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                disabled={busy || !selectionPanel.text.trim()}
-                onClick={() => void copySelectionResult()}
-              >
-                {t("write_selection_copy")}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={closeSelectionPanel}>
-                {t("write_selection_exit")}
-              </button>
-              <div className="write-selection-card__actions-right">
-                <button
-                  type="button"
-                  className="write-selection-icon-btn"
-                  title={t("write_selection_regenerate")}
-                  aria-label={t("write_selection_regenerate")}
-                  disabled={busy}
-                  onClick={() =>
-                    void runSelectionAi(selectionPanel.mode, {
-                      start: selectionPanel.start,
-                      end: selectionPanel.end,
-                    })
-                  }
-                >
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
+            {t("write_selection_append")}
+          </button>
+          <button
+            type="button"
+            className="write-selection-float__item"
+            disabled={busy}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void addSelectionToCharacter()}
+          >
+            {t("write_selection_to_character")}
+          </button>
+          <button
+            type="button"
+            className="write-selection-float__item"
+            disabled={busy}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void addSelectionToMemo()}
+          >
+            {t("write_selection_to_memo")}
+          </button>
         </div>
       )}
     </div>

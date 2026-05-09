@@ -18,8 +18,10 @@ VersionChangeType = Literal[
     "ai_generate",
     "ai_rewrite",
     "ai_append",
+    "selection_rewrite",
     "selection_expand",
     "selection_polish",
+    "selection_append",
     "rollback",
 ]
 

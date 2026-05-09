@@ -8,11 +8,10 @@ import {
   type ReactNode,
 } from "react";
 
-export type ThemeId = "light" | "sepia" | "dark";
+export type ThemeId = "light" | "dark";
 
 export const THEMES: { id: ThemeId; label: string; icon: string }[] = [
   { id: "light", label: "日间", icon: "☼" },
-  { id: "sepia", label: "护眼", icon: "◐" },
   { id: "dark", label: "夜间", icon: "☾" },
 ];
 
@@ -20,7 +19,7 @@ const GLOBAL_THEME_KEY = "inkmind_global_theme";
 
 function readStoredTheme(): ThemeId {
   const stored = localStorage.getItem(GLOBAL_THEME_KEY);
-  if (stored && ["light", "sepia", "dark"].includes(stored)) {
+  if (stored === "light" || stored === "dark") {
     return stored as ThemeId;
   }
   return "light";
@@ -44,7 +43,6 @@ type ThemeState = {
   theme: ThemeId;
   setTheme: (theme: ThemeId) => void;
   isDark: boolean;
-  isSepia: boolean;
   isLight: boolean;
 };
 
@@ -72,7 +70,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       theme,
       setTheme,
       isDark: theme === "dark",
-      isSepia: theme === "sepia",
       isLight: theme === "light",
     }),
     [theme, setTheme]
