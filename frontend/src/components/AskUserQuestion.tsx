@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { PendingQuestionData, QuestionOption } from "@/types/sse";
+import { useMemo, useState } from "react";
+import type { PendingQuestionData, QuestionOption, RawQuestionOption } from "@/types/sse";
 import { useI18n } from "@/i18n";
 
 export interface AskUserQuestionProps {
@@ -13,7 +13,37 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
   const [customInput, setCustomInput] = useState("");
   const [selectedOption, setSelectedOption] = useState<QuestionOption | null>(null);
 
-  const hasOptions = question.options && question.options.length > 0;
+  const normalizedOptions = useMemo<QuestionOption[]>(() => {
+    const rawOptions = Array.isArray(question.options) ? question.options : [];
+    return rawOptions
+      .map((opt: RawQuestionOption) => {
+        if (typeof opt === "string") {
+          const label = opt.trim();
+          return label ? { label } : null;
+        }
+        const label = opt?.label?.trim();
+        return label ? { label, description: opt.description } : null;
+      })
+      .filter((opt): opt is QuestionOption => Boolean(opt));
+  }, [question.options]);
+
+  const fallbackOptions = useMemo<QuestionOption[]>(() => {
+    if (normalizedOptions.length > 0) return [];
+    return [
+      {
+        label: t("ai_question_default_decide"),
+        description: t("ai_question_default_decide_desc"),
+      },
+      {
+        label: t("ai_question_default_skip"),
+        description: t("ai_question_default_skip_desc"),
+      },
+    ];
+  }, [normalizedOptions.length, t]);
+
+  const displayOptions = normalizedOptions.length > 0 ? normalizedOptions : fallbackOptions;
+  const hasOptions = displayOptions.length > 0;
+  const showCustomInput = question.allow_custom !== false || normalizedOptions.length === 0;
 
   const handleOptionClick = (opt: QuestionOption) => {
     setSelectedOption(opt);
@@ -36,7 +66,7 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
 
       {hasOptions && (
         <div className="ai-assistant-question__options">
-          {question.options.map((opt, idx) => (
+          {displayOptions.map((opt, idx) => (
             <button
               key={idx}
               type="button"
@@ -55,30 +85,32 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
         </div>
       )}
 
-      <div className="ai-assistant-question__custom">
-        <input
-          type="text"
-          className="ai-assistant-question__input"
-          value={customInput}
-          onChange={(e) => setCustomInput(e.target.value)}
-          placeholder={t("ai_question_custom_placeholder") || "输入你的回答..."}
-          disabled={disabled}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && customInput.trim()) {
-              e.preventDefault();
-              handleCustomSubmit();
-            }
-          }}
-        />
-        <button
-          type="button"
-          className="ai-assistant-question__submit"
-          onClick={handleCustomSubmit}
-          disabled={disabled || !customInput.trim()}
-        >
-          {t("ai_question_submit") || "提交"}
-        </button>
-      </div>
+      {showCustomInput && (
+        <div className="ai-assistant-question__custom">
+          <input
+            type="text"
+            className="ai-assistant-question__input"
+            value={customInput}
+            onChange={(e) => setCustomInput(e.target.value)}
+            placeholder={t("ai_question_custom_placeholder")}
+            disabled={disabled}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && customInput.trim()) {
+                e.preventDefault();
+                handleCustomSubmit();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="ai-assistant-question__submit"
+            onClick={handleCustomSubmit}
+            disabled={disabled || !customInput.trim()}
+          >
+            {t("ai_question_submit")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

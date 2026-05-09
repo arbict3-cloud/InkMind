@@ -37,10 +37,12 @@ export interface QuestionOption {
   description?: string;
 }
 
+export type RawQuestionOption = QuestionOption | string;
+
 export interface QuestionItem {
   question: string;
   header?: string;
-  options: QuestionOption[];
+  options: RawQuestionOption[];
   multiSelect?: boolean;
 }
 
@@ -48,7 +50,7 @@ export interface PendingQuestionData {
   question_id: string;
   questions: QuestionItem[];
   question: string;
-  options: QuestionOption[];
+  options: RawQuestionOption[];
   header?: string;
   multi_select?: boolean;
   allow_custom?: boolean;
