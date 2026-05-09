@@ -82,7 +82,7 @@ def novel_ai_chat(
         )
     chapters = db.query(Chapter).filter(Chapter.novel_id == novel_id).order_by(Chapter.sort_order).all()
     characters = db.query(Character).filter(Character.novel_id == novel_id).order_by(Character.id).all()
-    system, user_msg = novel_writing_chat_messages(novel, body.message, body.history, language=language, chapters=chapters, characters=characters)
+    system, user_msg = novel_writing_chat_messages(novel, body.message, body.history, language=language, chapters=chapters, characters=characters, db=db)
 
     def gen():
         try:

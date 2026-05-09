@@ -1,0 +1,25 @@
+{
+  "name": "generate_chapter",
+  "display_name": "生成章节正文",
+  "description": "生成符合上下文的小说正文。接收本章概要（chapter_summary）和固定标题（fixed_title，可选），使用 NovelMemory 自动构建上下文，返回章节内容。此工具必须单独调用，不能与其他工具并行。",
+  "category": "generation",
+  "parameters": [
+    {
+      "name": "chapter_summary",
+      "type": "string",
+      "description": "本章概要内容",
+      "required": true
+    },
+    {
+      "name": "fixed_title",
+      "type": "string",
+      "description": "固定标题（可选），如果提供则不自动生成标题",
+      "required": false
+    }
+  ],
+  "applicable_phases": ["chapter_content"],
+  "user_callable": true,
+  "requires_chapter": false,
+  "requires_stream": true,
+  "examples": ["生成章节正文", "写一章"]
+}

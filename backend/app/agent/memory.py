@@ -87,6 +87,33 @@ class NovelMemory:
         matched.sort(key=lambda x: x[0], reverse=True)
         return [char for _, char in matched]
 
+    def build_lightweight_context(self) -> str:
+        """构建轻量级上下文，仅包含作品元数据。
+
+        用于 AI 对话等不需要完整上下文的场景，
+        避免将大量内容注入主 Agent 上下文窗口。
+        """
+        genre = self._novel.genre or "未指定"
+        bg_brief = _clip(self._novel.background, 200) or "（未填写）"
+
+        chapter_count = (
+            self._db.query(Chapter)
+            .filter(Chapter.novel_id == self._novel.id)
+            .count()
+        )
+
+        char_count = (
+            self._db.query(Character)
+            .filter(Character.novel_id == self._novel.id)
+            .count()
+        )
+
+        return f"""【作品标题】{self._novel.title}
+【类型】{genre}
+【背景简介】{bg_brief}
+【章节数】{chapter_count}
+【人物数】{char_count}"""
+
     def build_context(self, chapter_summary: str) -> str:
         """构建完整的生成上下文字符串。
 

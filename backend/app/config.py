@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./inkmind.db"
 
-    default_llm_provider: str = "openai"
+    default_llm_provider: str = "qwen"
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     openai_model: str = "gpt-4o-mini"
@@ -52,7 +52,12 @@ class Settings(BaseSettings):
     moonshot_timeout: float = 120.0
 
     anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-3-5-sonnet-20241022"
+    anthropic_base_url: str | None = None
+    anthropic_model: str = "claude-sonnet-4-20250514"
+
+    claude_cli_path: str | None = None
+    agent_max_turns: int = 30
+    agent_permission_mode: str = "bypassPermissions"
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 

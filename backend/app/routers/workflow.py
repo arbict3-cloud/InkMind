@@ -24,6 +24,7 @@ from app.deps import CurrentUser
 from app.language import Language
 from app.llm.llm_errors import LLMRequestError
 from app.llm.ndjson_stream import ndjson_line
+from app.llm.sse_stream import SseStreamBuilder, convert_ndjson_chunk_to_sse
 from app.llm.providers import list_available_providers, resolve_llm_for_user
 from app.models import Chapter, Novel
 from app.observability.otel_ai import ai_span
@@ -369,6 +370,81 @@ def execute_phase_stream(
         gen(),
         media_type="application/x-ndjson",
         headers=_STREAM_HEADERS,
+    )
+
+
+@router.post("/{workflow_id}/execute-sse")
+def execute_phase_sse(
+    novel_id: int,
+    workflow_id: str,
+    body: ExecutePhaseRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    language: Language,
+) -> StreamingResponse:
+    """执行当前阶段（SSE 流式）。
+
+    与 execute-stream 类似，但使用 SSE 协议，支持：
+    - snapshot/patch/delta 三层增量更新
+    - agent_step 事件展示工具调用过程
+    - question 事件支持 AskUserQuestion
+    - status 事件追踪状态变更
+
+    Args:
+        novel_id: 小说 ID
+        workflow_id: 工作流 ID
+        body: 执行请求
+
+    Returns:
+        SSE 事件流
+    """
+    if not list_available_providers():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="未配置任何 LLM API Key",
+        )
+
+    novel = _get_owned_novel(db, user.id, novel_id)
+    state = _load_workflow_state(workflow_id)
+
+    if state.novel_id != novel.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="工作流不属于该小说",
+        )
+
+    engine = _get_workflow_engine(db, user, novel, language)
+    builder = SseStreamBuilder(workflow_id=workflow_id)
+
+    def gen():
+        try:
+            yield builder.build_status("running", state.current_phase.value).encode()
+
+            with ai_span("workflow.execute_phase_sse", novel_id=novel_id, workflow_id=workflow_id):
+                for chunk in engine.execute_current_phase_stream(state, body.user_modifications):
+                    sse_events = convert_ndjson_chunk_to_sse(chunk, builder)
+                    for event in sse_events:
+                        yield event.encode()
+
+            _save_workflow_state(workflow_id, state)
+
+            progress = engine.get_progress(state)
+            yield builder.build_status(
+                "waiting_user_confirm" if state.status.value == "waiting_user_confirm" else state.status.value,
+                state.current_phase.value,
+            ).encode()
+            yield builder.build_done(progress=progress.to_dict()).encode()
+
+        except LLMRequestError as e:
+            yield builder.build_error(e.message).encode()
+        except Exception as e:
+            log.exception("SSE 流式执行阶段失败")
+            yield builder.build_error(str(e)).encode()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={**_STREAM_HEADERS, "Connection": "keep-alive"},
     )
 
 

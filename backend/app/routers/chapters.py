@@ -13,6 +13,7 @@ from app.llm.llm_errors import LLMRequestError
 from app.prompts import get_prompt
 from app.llm.metered_llm import llm_usage_session
 from app.llm.ndjson_stream import filter_think_chunks, ndjson_line
+from app.llm.sse_stream import SseStreamBuilder, convert_ndjson_chunk_to_sse
 from app.llm.providers import list_available_providers, normalize_provider_name, resolve_llm_for_user
 from app.models import Chapter, ChapterVersion
 from app.observability.otel_ai import ai_span
@@ -301,6 +302,209 @@ def generate_chapter(
         gen(),
         media_type="application/x-ndjson",
         headers=_STREAM_HEADERS,
+    )
+
+
+@router.post("/generate-sse")
+def generate_chapter_sse(
+    novel_id: int,
+    body: ChapterGenerateIn,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+    language: Language,
+):
+    """SSE 流式章节生成。
+
+    与 /generate 类似，但使用 SSE 协议，支持：
+    - agent_step 事件展示工具调用过程
+    - delta 事件逐 token 更新
+    - status 事件追踪状态变更
+    - question 事件支持 AskUserQuestion
+    """
+    novel = _get_owned_novel(db, user.id, novel_id)
+    available = list_available_providers()
+    if not available:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="未配置任何 LLM API Key",
+        )
+
+    target: Chapter | None = None
+    if body.chapter_id is not None:
+        target = db.get(Chapter, body.chapter_id)
+        if target is None or target.novel_id != novel_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="章节不存在")
+
+    req_title = (body.title or "").strip()
+    fixed_title = req_title if body.lock_title and req_title else None
+    word_count = body.word_count if body.word_count and 500 <= body.word_count <= 4000 else None
+    provider_name = normalize_provider_name(None, user)
+
+    agent_mode = getattr(user, "agent_mode", "flexible")
+    max_iterations = getattr(user, "max_llm_iterations", 10)
+    enable_auto_audit = getattr(user, "enable_auto_audit", True)
+    preview_before_save = getattr(user, "preview_before_save", True)
+    auto_audit_min_score = getattr(user, "auto_audit_min_score", 60)
+
+    save_to_db = not preview_before_save
+
+    def gen():
+        builder = SseStreamBuilder()
+        with llm_usage_session(db, user.id, provider_name, "AI生成") as accumulator:
+            try:
+                llm = resolve_llm_for_user(user, None, db=db, action="AI生成", accumulator=accumulator)
+            except ValueError as e:
+                yield builder.build_error(str(e)).encode()
+                return
+
+            if target is not None and target.content and save_to_db:
+                save_version_before_change(db, target, "ai_generate")
+
+            try:
+                yield builder.build_status("running").encode()
+
+                title_out = ""
+                body_text = ""
+                ch: Chapter | None = None
+
+                if agent_mode == "direct":
+                    yield builder.build_agent_step(step_type="generating", tool_name="direct_generation").encode()
+                    with ai_span("chapter.generate.direct", novel_id=novel_id):
+                        result = run_direct_chapter_generation(
+                            db, novel, body.summary.strip(), target,
+                            llm, fixed_title=fixed_title, word_count=word_count,
+                            save_to_db=save_to_db, language=language
+                        )
+                    ch = None
+                    body_parts: list[str] = []
+                    last_two: list[str] = []
+                    for item in result:
+                        if isinstance(item, Chapter):
+                            ch = item
+                            title_out = ch.title
+                            body_text = ch.content
+                        elif isinstance(item, str):
+                            if save_to_db:
+                                body_parts.append(item)
+                                if item:
+                                    yield builder.build_text_delta(item).encode()
+                            else:
+                                last_two.append(item)
+                                if len(last_two) > 2:
+                                    last_two.pop(0)
+                    if not save_to_db and len(last_two) >= 2:
+                        title_out = last_two[-2]
+                        body_text = last_two[-1]
+                    if not body_text and body_parts:
+                        from app.services.chapter_gen import _sanitize_generated_body
+                        body_text = _sanitize_generated_body("".join(body_parts))
+
+                elif agent_mode == "react":
+                    yield builder.build_agent_step(step_type="generating", tool_name="react_agent").encode()
+                    with ai_span("chapter.generate.react_agent", novel_id=novel_id):
+                        result = run_react_chapter_generation(
+                            db, novel, body.summary.strip(), target,
+                            llm, fixed_title=fixed_title, word_count=word_count,
+                            max_iterations=max_iterations, language=language
+                        )
+                    ch = None
+                    body_parts: list[str] = []
+                    for item in result:
+                        if isinstance(item, Chapter):
+                            ch = item
+                            title_out = ch.title
+                            body_text = ch.content
+                        else:
+                            sse_events = convert_ndjson_chunk_to_sse(item, builder)
+                            for event in sse_events:
+                                yield event.encode()
+                            if isinstance(item, str) and not item.startswith("["):
+                                body_parts.append(item)
+                    if not body_text and body_parts:
+                        from app.services.chapter_gen import _sanitize_generated_body
+                        body_text = _sanitize_generated_body("".join(body_parts))
+
+                else:
+                    yield builder.build_agent_step(step_type="generating", tool_name="flexible_agent").encode()
+                    with ai_span("chapter.generate.flexible_agent", novel_id=novel_id):
+                        result = run_flexible_chapter_generation(
+                            db, novel, body.summary.strip(), target,
+                            llm, fixed_title=fixed_title, word_count=word_count,
+                            max_iterations=max_iterations, language=language
+                        )
+                    ch = None
+                    body_parts: list[str] = []
+                    for item in result:
+                        if isinstance(item, Chapter):
+                            ch = item
+                            title_out = ch.title
+                            body_text = ch.content
+                        else:
+                            sse_events = convert_ndjson_chunk_to_sse(item, builder)
+                            for event in sse_events:
+                                yield event.encode()
+                            if isinstance(item, str) and not item.startswith("["):
+                                body_parts.append(item)
+                    if not body_text and body_parts:
+                        from app.services.chapter_gen import _sanitize_generated_body
+                        body_text = _sanitize_generated_body("".join(body_parts))
+
+                evaluate_result = None
+                needs_revision = False
+
+                if enable_auto_audit and body_text.strip():
+                    yield builder.build_agent_step(step_type="evaluating", tool_name="auto_audit").encode()
+                    try:
+                        eval_buf: list[str] = []
+                        with ai_span("chapter.auto_evaluate", novel_id=novel_id):
+                            for part in filter_think_chunks(stream_evaluate_tokens(
+                                llm,
+                                novel,
+                                title=title_out or "",
+                                summary=body.summary.strip(),
+                                content=body_text,
+                                language=language,
+                            )):
+                                eval_buf.append(part)
+                                yield builder.build_text_delta(part).encode()
+                        eval_raw = "".join(eval_buf)
+                        evaluate_result = parse_evaluation_json(eval_raw)
+
+                        if evaluate_result.de_ai_score < auto_audit_min_score:
+                            needs_revision = True
+
+                    except Exception:
+                        pass
+
+                yield builder.build_status("completed").encode()
+
+                result_data: dict[str, Any] = {"done": True}
+                if preview_before_save:
+                    result_data["preview"] = ChapterPreviewOut(
+                        title=title_out,
+                        content=body_text,
+                        summary=body.summary.strip(),
+                        evaluate_result=evaluate_result,
+                        needs_revision=needs_revision,
+                    ).model_dump(mode="json")
+                elif ch is not None:
+                    result_data["chapter"] = ChapterOut.model_validate(ch).model_dump(mode="json")
+                if evaluate_result:
+                    result_data["evaluate"] = evaluate_result.model_dump(mode="json")
+
+                from app.llm.sse_stream import sse_done
+                yield sse_done(**result_data).encode()
+
+            except LLMRequestError as e:
+                yield builder.build_error(e.message).encode()
+            except Exception as e:
+                db.rollback()
+                yield builder.build_error(str(e) or "生成失败").encode()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={**_STREAM_HEADERS, "Connection": "keep-alive"},
     )
 
 
@@ -855,6 +1059,11 @@ def delete_chapter(
     if ch is None or ch.novel_id != novel_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="章节不存在")
     db.delete(ch)
+    db.commit()
+    remaining = db.query(Chapter).filter(Chapter.novel_id == novel_id).order_by(Chapter.sort_order, Chapter.id).all()
+    for i, c in enumerate(remaining):
+        if c.sort_order != i:
+            c.sort_order = i
     db.commit()
 
 

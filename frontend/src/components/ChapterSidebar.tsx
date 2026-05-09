@@ -53,8 +53,7 @@ export default function ChapterSidebar({
                     onSelectChapter(c.id);
                   }}
                 >
-                  {c.title?.trim() ||
-                    `${t("write_chapter_n")} ${idx + 1}${t("write_chapter_n_suffix")}`}
+                  {`${t("write_chapter_n")}${idx + 1}${t("write_chapter_n_suffix")}${c.title?.trim() ? ` ${c.title.trim()}` : ""}`}
                 </button>
                 <button
                   type="button"
