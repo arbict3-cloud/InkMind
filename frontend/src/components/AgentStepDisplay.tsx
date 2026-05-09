@@ -7,6 +7,7 @@ interface Props {
 }
 
 type StepStatus = "running" | "done" | "error";
+type PhaseStatus = "pending" | "running" | "done" | "error";
 
 interface GroupedStep {
   rawName: string;
@@ -15,6 +16,13 @@ interface GroupedStep {
   status: StepStatus;
   result?: string;
   count: number;
+}
+
+interface PhaseItem {
+  id: string;
+  title: string;
+  status: PhaseStatus;
+  detail?: string;
 }
 
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -31,6 +39,26 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   ask_user: "agent_tool_ask_user",
   agent_connect: "agent_tool_agent_connect",
   agent_query: "agent_tool_agent_query",
+  get_writing_context_pack: "agent_tool_get_writing_context_pack",
+  quality_check_chapter: "agent_tool_quality_check_chapter",
+};
+
+const PHASE_ORDER = [
+  "read_context",
+  "chapter_summary",
+  "user_confirm",
+  "chapter_content",
+  "quality_check",
+  "save_chapter",
+];
+
+const PHASE_I18N: Record<string, string> = {
+  read_context: "agent_phase_read_context",
+  chapter_summary: "agent_phase_chapter_summary",
+  user_confirm: "agent_phase_user_confirm",
+  chapter_content: "agent_phase_chapter_content",
+  quality_check: "agent_phase_quality_check",
+  save_chapter: "agent_phase_save_chapter",
 };
 
 function cleanToolName(raw: string): string {
@@ -77,6 +105,9 @@ function groupSteps(steps: SseAgentStepData[], t: (key: string) => string): Grou
   };
 
   for (const step of steps) {
+    if (step.step_type === "phase") {
+      continue;
+    }
     if (step.step_type === "tool_call") {
       const rawName = step.tool_name || "unknown";
       upsertTool(rawName, "running");
@@ -109,18 +140,44 @@ function groupSteps(steps: SseAgentStepData[], t: (key: string) => string): Grou
   return result;
 }
 
+function collectPhases(steps: SseAgentStepData[], t: (key: string) => string): PhaseItem[] {
+  const latest = new Map<string, PhaseItem>();
+  for (const step of steps) {
+    if (step.step_type !== "phase" || !step.phase_id) continue;
+    latest.set(step.phase_id, {
+      id: step.phase_id,
+      title: step.phase_title || t(PHASE_I18N[step.phase_id] || step.phase_id),
+      status: step.phase_status || "pending",
+      detail: step.phase_detail,
+    });
+  }
+  return PHASE_ORDER
+    .filter((id) => latest.has(id))
+    .map((id) => latest.get(id)!)
+    .concat([...latest.values()].filter((phase) => !PHASE_ORDER.includes(phase.id)));
+}
+
 function statusIcon(status: StepStatus) {
   if (status === "done") return "✓";
   if (status === "error") return "✗";
   return "→";
 }
 
+function phaseIcon(status: PhaseStatus) {
+  if (status === "done") return "✓";
+  if (status === "error") return "!";
+  if (status === "running") return "•";
+  return "";
+}
+
 export default function AgentStepDisplay({ steps }: Props) {
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
   const grouped = useMemo(() => groupSteps(steps, t), [steps, t]);
+  const phases = useMemo(() => collectPhases(steps, t), [steps, t]);
   const runningCount = grouped.filter((group) => group.status === "running").length;
   const totalCalls = grouped.reduce((sum, group) => sum + group.count, 0);
+  const activePhase = phases.find((phase) => phase.status === "running");
 
   if (!steps.length) return null;
 
@@ -132,14 +189,32 @@ export default function AgentStepDisplay({ steps }: Props) {
         onClick={() => setCollapsed((value) => !value)}
         aria-expanded={!collapsed}
       >
-        <span className="ai-assistant-agent-steps__title">{t("agent_steps_title")}</span>
+        <span className="ai-assistant-agent-steps__title">
+          {phases.length > 0 ? t("agent_phases_title") : t("agent_steps_title")}
+        </span>
         <span className="ai-assistant-agent-steps__meta">
-          {runningCount > 0
-            ? t("agent_steps_running").replace("{count}", String(runningCount))
-            : t("agent_steps_done").replace("{count}", String(totalCalls))}
+          {activePhase
+            ? t(PHASE_I18N[activePhase.id] || activePhase.title)
+            : runningCount > 0
+              ? t("agent_steps_running").replace("{count}", String(runningCount))
+              : t("agent_steps_done").replace("{count}", String(totalCalls))}
         </span>
         <span className={`ai-assistant-agent-steps__chevron${collapsed ? " is-collapsed" : ""}`}>⌃</span>
       </button>
+      {!collapsed && phases.length > 0 && (
+        <div className="ai-assistant-phase-timeline" aria-label={t("agent_phases_title")}>
+          {phases.map((phase) => (
+            <div key={phase.id} className={`ai-assistant-phase ai-assistant-phase--${phase.status}`}>
+              <span className="ai-assistant-phase__rail" />
+              <span className="ai-assistant-phase__dot">{phaseIcon(phase.status)}</span>
+              <span className="ai-assistant-phase__body">
+                <span className="ai-assistant-phase__title">{t(PHASE_I18N[phase.id] || phase.title)}</span>
+                {phase.detail && <span className="ai-assistant-phase__detail">{phase.detail}</span>}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       {!collapsed && (
         <div className="ai-assistant-agent-steps__list">
           {grouped.map((group, i) => (

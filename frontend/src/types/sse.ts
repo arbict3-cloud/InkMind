@@ -58,11 +58,15 @@ export interface PendingQuestionData {
 }
 
 export interface SseAgentStepData {
-  step_type: "tool_call" | "tool_result" | "generating" | "evaluating" | "finish";
+  step_type: "tool_call" | "tool_result" | "generating" | "evaluating" | "phase" | "finish";
   tool_name?: string;
   tool_params?: Record<string, unknown>;
   thought?: string;
   result_preview?: string;
+  phase_id?: string;
+  phase_status?: "pending" | "running" | "done" | "error";
+  phase_title?: string;
+  phase_detail?: string;
   step_number?: number;
   total_steps?: number;
   is_parallel: boolean;

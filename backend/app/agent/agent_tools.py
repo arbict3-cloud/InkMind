@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -31,6 +32,7 @@ log = logging.getLogger(__name__)
 
 _db_session_factory: Any = None
 _novel_id: int = 0
+_DEFAULT_TARGET_WORD_COUNT = 1800
 
 
 def init_tool_context(db_session_factory: Any, novel_id: int) -> None:
@@ -51,6 +53,117 @@ def _get_novel() -> Novel:
     if novel is None:
         raise ValueError(f"小说 {_novel_id} 不存在")
     return novel
+
+
+def _clip_text(value: str | None, limit: int) -> str:
+    text = (value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def _infer_memo_bucket(title: str, body: str) -> str:
+    text = f"{title}\n{body}"
+    if re.search(r"(禁写|不要|避免|禁忌|雷点|避雷|不允许|不能写)", text):
+        return "forbidden"
+    if re.search(r"(伏笔|线索|悬念|坑|铺垫|回收)", text):
+        return "foreshadowing"
+    return "general"
+
+
+def _extract_target_word_count(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_TARGET_WORD_COUNT
+    if 800 <= parsed <= 5000:
+        return parsed
+    return _DEFAULT_TARGET_WORD_COUNT
+
+
+def _build_writing_context_pack(
+    db: Session,
+    novel: Novel,
+    *,
+    target_word_count: Any = None,
+    chapter_summary_hint: Any = None,
+) -> dict[str, Any]:
+    target = _extract_target_word_count(target_word_count)
+    hint = _clip_text(chapter_summary_hint, 800)
+
+    chapters_query = (
+        db.query(Chapter)
+        .filter(Chapter.novel_id == novel.id)
+        .order_by(Chapter.sort_order, Chapter.id)
+    )
+    chapter_count = chapters_query.count()
+    recent_chapters = chapters_query.offset(max(0, chapter_count - 5)).limit(5).all()
+    recent = [
+        {
+            "chapter_number": max(1, chapter_count - len(recent_chapters) + idx + 1),
+            "id": ch.id,
+            "title": ch.title,
+            "summary": _clip_text(ch.summary, 360),
+            "word_count": len(ch.content) if ch.content else 0,
+        }
+        for idx, ch in enumerate(recent_chapters)
+    ]
+
+    characters = (
+        db.query(Character)
+        .filter(Character.novel_id == novel.id)
+        .order_by(Character.id.desc())
+        .limit(10)
+        .all()
+    )
+    active_characters = [
+        {
+            "id": ch.id,
+            "name": ch.name,
+            "profile": _clip_text(ch.profile, 320),
+            "notes": _clip_text(ch.notes, 180),
+        }
+        for ch in characters
+    ]
+
+    memos = db.query(NovelMemo).filter(NovelMemo.novel_id == novel.id).all()
+    foreshadowing: list[dict[str, str]] = []
+    forbidden: list[dict[str, str]] = []
+    constraints: list[dict[str, str]] = []
+    for memo in memos:
+        item = {"title": memo.title, "body": _clip_text(memo.body, 360)}
+        bucket = _infer_memo_bucket(memo.title, memo.body or "")
+        if bucket == "forbidden":
+            forbidden.append(item)
+        elif bucket == "foreshadowing":
+            foreshadowing.append(item)
+        else:
+            constraints.append(item)
+
+    return {
+        "pack_version": 1,
+        "novel": {
+            "id": novel.id,
+            "title": novel.title,
+            "genre": novel.genre,
+            "background": _clip_text(novel.background, 900),
+            "writing_style": _clip_text(novel.writing_style, 520),
+            "chapter_count": chapter_count,
+            "next_chapter_number": chapter_count + 1,
+            "next_sort_order": (db.scalar(select(func.max(Chapter.sort_order)).where(Chapter.novel_id == novel.id)) or 0) + 1,
+        },
+        "recent_chapter_summaries": recent,
+        "active_characters": active_characters,
+        "foreshadowing": foreshadowing[:8],
+        "forbidden_content": forbidden[:8],
+        "style_constraints": {
+            "target_word_count": target,
+            "minimum_word_count": max(800, int(target * 0.85)),
+            "voice": _clip_text(novel.writing_style, 520),
+            "chapter_summary_hint": hint,
+            "notes": [_clip_text(item["body"], 180) for item in constraints[:6] if item["body"]],
+        },
+    }
 
 
 @tool("get_novel_state", "获取小说的当前状态：基本信息、章节数量、最近章节概要、人物数量等。用于了解项目进度。", {})
@@ -206,6 +319,75 @@ async def get_memos(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "get_writing_context_pack",
+    "一次性获取写作上下文包：作品状态、最近章节摘要、活跃人物、伏笔、禁写内容、目标字数和风格约束。写作任务应优先调用它，避免重复读取章节/人物/备忘录。",
+    {"target_word_count": int, "chapter_summary_hint": str},
+)
+async def get_writing_context_pack(args: dict[str, Any]) -> dict[str, Any]:
+    db = _get_db()
+    novel = db.query(Novel).filter(Novel.id == _novel_id).first()
+    if novel is None:
+        db.close()
+        raise ValueError(f"小说 {_novel_id} 不存在")
+    result = _build_writing_context_pack(
+        db,
+        novel,
+        target_word_count=args.get("target_word_count"),
+        chapter_summary_hint=args.get("chapter_summary_hint"),
+    )
+    db.close()
+    return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
+
+
+@tool(
+    "quality_check_chapter",
+    "保存前对本章进行轻量质量检查：字数、标题、摘要、禁写内容和上下文一致性。必须在 save_chapter 前调用。",
+    {"title": str, "content": str, "summary": str, "target_word_count": int, "context_pack": dict},
+)
+async def quality_check_chapter(args: dict[str, Any]) -> dict[str, Any]:
+    title = (args.get("title") or "").strip()
+    content = (args.get("content") or "").strip()
+    summary = (args.get("summary") or "").strip()
+    target_word_count = _extract_target_word_count(args.get("target_word_count"))
+    context_pack = args.get("context_pack") if isinstance(args.get("context_pack"), dict) else {}
+    minimum_word_count = int(
+        context_pack.get("style_constraints", {}).get("minimum_word_count")
+        or max(800, target_word_count * 0.85)
+    )
+
+    issues: list[dict[str, str]] = []
+    if not title:
+        issues.append({"level": "error", "message": "缺少章节标题"})
+    if not content:
+        issues.append({"level": "error", "message": "缺少章节正文"})
+    if len(content) < minimum_word_count:
+        issues.append({
+            "level": "warning",
+            "message": f"正文偏短：当前约 {len(content)} 字，建议至少 {minimum_word_count} 字",
+        })
+    if not summary:
+        issues.append({"level": "warning", "message": "缺少章节摘要"})
+
+    forbidden_items = context_pack.get("forbidden_content", []) if isinstance(context_pack, dict) else []
+    for item in forbidden_items[:6]:
+        body = str(item.get("body", "") if isinstance(item, dict) else "")
+        title_text = str(item.get("title", "") if isinstance(item, dict) else "")
+        for keyword in re.findall(r"[\u4e00-\u9fffA-Za-z0-9]{3,}", f"{title_text} {body}")[:4]:
+            if keyword and keyword in content:
+                issues.append({"level": "warning", "message": f"可能触及禁写内容：{keyword}"})
+                break
+
+    result = {
+        "passed": not any(issue["level"] == "error" for issue in issues),
+        "word_count": len(content),
+        "target_word_count": target_word_count,
+        "minimum_word_count": minimum_word_count,
+        "issues": issues,
+    }
+    return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
+
+
+@tool(
     "dispatch_generation_task",
     "调度内容生成任务到子智能体。任务异步执行，立即返回任务 ID，需要用 poll_task_result 轮询结果。",
     {"task_type": str, "params": dict},
@@ -217,6 +399,24 @@ async def dispatch_generation_task(args: dict[str, Any]) -> dict[str, Any]:
     from app.config import settings
     if "sub_agent_provider" not in params:
         params["sub_agent_provider"] = settings.default_llm_provider
+
+    if task_type == "generate_chapter" and "context_pack" not in params:
+        db = _get_db()
+        try:
+            novel = db.query(Novel).filter(Novel.id == _novel_id).first()
+            if novel is not None:
+                params["context_pack"] = _build_writing_context_pack(
+                    db,
+                    novel,
+                    target_word_count=params.get("word_count"),
+                    chapter_summary_hint=params.get("chapter_summary"),
+                )
+                params.setdefault(
+                    "word_count",
+                    params["context_pack"]["style_constraints"]["target_word_count"],
+                )
+        finally:
+            db.close()
 
     queue = get_task_queue()
     task_id = await queue.submit(task_type=task_type, params=params)
@@ -317,6 +517,7 @@ async def save_chapter(args: dict[str, Any]) -> dict[str, Any]:
     result = {
         "success": True,
         "chapter_id": chapter.id,
+        "chapter_number": sort_order,
         "title": chapter.title,
         "word_count": len(content),
     }
@@ -356,9 +557,11 @@ ALL_TOOLS = [
     get_chapter_detail,
     get_characters,
     get_memos,
+    get_writing_context_pack,
     dispatch_generation_task,
     poll_task_result,
     poll_multiple_tasks,
+    quality_check_chapter,
     save_chapter,
     delete_chapter,
 ]

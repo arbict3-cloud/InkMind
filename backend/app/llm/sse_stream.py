@@ -140,6 +140,10 @@ def sse_agent_step(
     tool_params: dict[str, Any] | None = None,
     thought: str | None = None,
     result_preview: str | None = None,
+    phase_id: str | None = None,
+    phase_status: str | None = None,
+    phase_title: str | None = None,
+    phase_detail: str | None = None,
     step_number: int | None = None,
     total_steps: int | None = None,
     is_parallel: bool = False,
@@ -156,6 +160,14 @@ def sse_agent_step(
         data["thought"] = thought
     if result_preview:
         data["result_preview"] = result_preview
+    if phase_id:
+        data["phase_id"] = phase_id
+    if phase_status:
+        data["phase_status"] = phase_status
+    if phase_title:
+        data["phase_title"] = phase_title
+    if phase_detail:
+        data["phase_detail"] = phase_detail
     if step_number is not None:
         data["step_number"] = step_number
     if total_steps is not None:
@@ -300,6 +312,22 @@ class SseStreamBuilder:
             step_type="tool_result",
             tool_name=tool_name,
             result_preview=result_preview,
+        )
+
+    def build_phase_step(
+        self,
+        phase_id: str,
+        phase_status: str,
+        *,
+        title: str | None = None,
+        detail: str | None = None,
+    ) -> SseEvent:
+        return sse_agent_step(
+            step_type="phase",
+            phase_id=phase_id,
+            phase_status=phase_status,
+            phase_title=title,
+            phase_detail=detail,
         )
 
     def build_generation_start(self) -> SseEvent:

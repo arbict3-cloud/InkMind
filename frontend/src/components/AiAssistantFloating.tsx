@@ -48,6 +48,23 @@ function saveJson(key: string, value: unknown): void {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
 }
 
+function stopStreamingMessages(messages: AgentMessage[]): AgentMessage[] {
+  return messages.map((message) => (
+    message.role === "assistant" && message.isStreaming
+      ? { ...message, isStreaming: false }
+      : message
+  ));
+}
+
+function sanitizeAssistantContent(content: string): string {
+  return content
+    .replace(/[（(]\s*章节\s*ID\s*[:：]\s*\d+\s*[）)]/gi, "")
+    .replace(/章节\s*ID\s*[:：]\s*\d+/gi, "")
+    .replace(/[（(]\s*chapter\s*id\s*[:：]\s*\d+\s*[）)]/gi, "")
+    .replace(/chapter\s*id\s*[:：]\s*\d+/gi, "")
+    .replace(/\s+([！!。,.，])/g, "$1");
+}
+
 function AiAssistantMark({ className = "" }: { className?: string }) {
   return (
     <span className={`ai-assistant-mark ${className}`} aria-hidden="true">
@@ -211,6 +228,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       },
       onQuestion: (data: any) => {
         console.log("[Question]", data.question, data.options);
+        setMessages((prev) => stopStreamingMessages(prev));
         setPendingQuestion(data);
       },
       onChapterSaved: (data: any) => {
@@ -225,21 +243,21 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         const s = data.status || "idle";
         setStatus(s);
         if (s === "waiting_for_user") {
+          setMessages((prev) => stopStreamingMessages(prev));
           setIsLoading(false);
         } else if (s === "idle") {
+          setMessages((prev) => stopStreamingMessages(prev));
           setIsLoading(false);
         }
       },
       onDone: () => {
-        const currentAid = activeAssistantIdRef.current;
-        setMessages((prev) => prev.map((m) => m.id === currentAid ? { ...m, isStreaming: false } : m));
+        setMessages((prev) => stopStreamingMessages(prev));
         setAgentSteps((prev) => [...prev, { step_type: "finish" as const, is_parallel: false, ts: Date.now() }]);
         setIsLoading(false);
       },
       onError: (data: any) => {
-        const currentAid = activeAssistantIdRef.current;
         setMessages((prev) => [
-          ...prev.map((m) => m.id === currentAid ? { ...m, isStreaming: false } : m),
+          ...stopStreamingMessages(prev),
           { id: generateId(), role: "error", content: data.message, timestamp: Date.now() },
         ]);
         setIsLoading(false);
@@ -256,7 +274,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setPendingQuestion(null);
     setAgentSteps([]);
 
-    setMessages((prev) => [...prev, { id: generateId(), role: "user", content: text, timestamp: Date.now() }]);
+    setMessages((prev) => [...stopStreamingMessages(prev), { id: generateId(), role: "user", content: text, timestamp: Date.now() }]);
 
     try {
       const cur = await ensureSession();
@@ -296,11 +314,14 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setPendingQuestion(null);
     setIsLoading(true);
     const answerText = selectedOption || answer;
-    setMessages((prev) => [...prev, { id: generateId(), role: "user", content: answerText, timestamp: Date.now() }]);
 
     const newAid = generateId();
     activeAssistantIdRef.current = newAid;
-    setMessages((prev) => [...prev, { id: newAid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true }]);
+    setMessages((prev) => [
+      ...stopStreamingMessages(prev),
+      { id: generateId(), role: "user", content: answerText, timestamp: Date.now() },
+      { id: newAid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true },
+    ]);
 
     try {
       await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption);
@@ -380,8 +401,8 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
                       <AiAssistantMark className="ai-assistant-mark--avatar" />
                     </div>
                     <div className="agent-message-body">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      {msg.isStreaming && msg.content.trim() && <span className="agent-cursor">▊</span>}
+                      <ReactMarkdown>{sanitizeAssistantContent(msg.content)}</ReactMarkdown>
+                      {msg.isStreaming && msg.content.trim() && <span className="agent-cursor" aria-hidden="true" />}
                     </div>
                   </div>
                 )}

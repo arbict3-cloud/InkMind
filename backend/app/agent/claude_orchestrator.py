@@ -61,6 +61,15 @@ _SDK_CONNECT_TIMEOUT_SECONDS = 30.0
 _SDK_QUERY_TIMEOUT_SECONDS = 30.0
 _SDK_IDLE_TIMEOUT_SECONDS = 90.0
 
+_WRITING_PHASES: dict[str, str] = {
+    "read_context": "读取作品状态",
+    "chapter_summary": "生成本章摘要",
+    "user_confirm": "用户确认",
+    "chapter_content": "生成正文",
+    "quality_check": "质量检查",
+    "save_chapter": "保存章节",
+}
+
 _ORCHESTRATOR_SYSTEM_PROMPT = """你是 InkMind 的 AI 创作总监（项目总指挥）。你的职责是：
 
 1. **理解用户意图**：分析用户的创作需求，判断需要执行什么操作
@@ -77,6 +86,22 @@ _ORCHESTRATOR_SYSTEM_PROMPT = """你是 InkMind 的 AI 创作总监（项目总�
 - 生成任务提交后，轮询等待结果，然后向用户汇报
 - 用中文与用户交流
 - **引用章节时务必使用 chapter_number 字段**（如"第3章"），不要使用 id 或 sort_order
+- 不要向用户展示数据库章节 ID，例如“章节 ID: 51”。需要说明章节位置时，只说“第 N 章”或章节标题。
+
+## 写作任务固定阶段
+
+当用户要求“写一章 / 续写一章 / 生成下一章”等章节写作任务时，必须按固定阶段执行，不要自由跳步：
+
+1. **读取作品状态**：优先调用 `get_writing_context_pack`，一次性取得最近章节摘要、活跃人物、伏笔、禁写内容、目标字数和风格约束。除非上下文包缺失关键信息，否则不要重复调用 `get_chapters` / `get_characters` / `get_memos`。
+2. **生成本章摘要**：基于 WritingContextPack 调度 `generate_summary` 或自行整理本章概要，明确标题倾向、冲突、推进点和结尾悬念。
+3. **用户确认**：调用 AskUserQuestion，请用户确认摘要方向，至少提供“按此生成正文”和“调整方向”两个选项。
+4. **生成正文**：调度 `generate_chapter`，必须把 `context_pack`、`chapter_summary`、`fixed_title`（如已确定）和 `word_count` 传给子智能体。若用户没给字数，使用上下文包里的 `target_word_count`。
+5. **质量检查**：保存前必须调用 `quality_check_chapter`，检查标题、摘要、正文长度、禁写内容和基本一致性。若只有 warning 可向用户说明后继续；error 必须修复。
+6. **保存章节**：用户确认保存或明确要求自动保存时，调用 `save_chapter`，并使用上下文包里的 `next_sort_order`。
+
+当用户要求“扩充到目标字数 / 扩写 / 加长”时，必须把 `word_count` 或明确的目标字数传给 `revise_chapter` / `generate_chapter` 任务；如果没有显式数字，使用上下文包的目标字数，且要求新版本明显长于旧版本。
+
+WritingContextPack 在同一次写作任务后续步骤中应复用，不要重复读取相同章节、人物和备忘录。上下文包不足时才补充调用细粒度读取工具。
 
 ## ⚠️ 与用户交互的强制规则
 
@@ -290,6 +315,45 @@ def _orchestrator_usage_provider() -> str:
     return "anthropic"
 
 
+def _normalize_tool_name(tool_name: str | None) -> str:
+    return (tool_name or "").replace("InkMind::", "").replace("mcp__inkmind__", "")
+
+
+def _phase_for_tool_call(tool_name: str, params: dict[str, Any] | None = None) -> str | None:
+    name = _normalize_tool_name(tool_name)
+    if name in {"get_writing_context_pack", "get_novel_state", "get_chapters", "get_characters", "get_memos"}:
+        return "read_context"
+    if name == "dispatch_generation_task":
+        task_type = (params or {}).get("task_type")
+        if task_type == "generate_summary":
+            return "chapter_summary"
+        if task_type == "generate_chapter":
+            return "chapter_content"
+    if name in {"quality_check_chapter"}:
+        return "quality_check"
+    if name == "save_chapter":
+        return "save_chapter"
+    if name == "AskUserQuestion":
+        return "user_confirm"
+    return None
+
+
+def _looks_like_chapter_writing_request(message: str) -> bool:
+    return any(
+        keyword in message
+        for keyword in (
+            "写一章",
+            "生成一章",
+            "续写一章",
+            "下一章",
+            "新章节",
+            "保存章节",
+            "write a chapter",
+            "next chapter",
+        )
+    )
+
+
 class ClaudeOrchestrator:
     """Claude 编排器。
 
@@ -360,9 +424,26 @@ class ClaudeOrchestrator:
         4. 将 SDK 消息转换为 SSE 事件
         """
         builder = SseStreamBuilder(workflow_id=session.session_id)
+        phase_status: dict[str, str] = {}
+        is_chapter_writing = _looks_like_chapter_writing_request(user_message.lower())
+
+        def build_phase(phase_id: str, status: str, detail: str | None = None) -> SseEvent | None:
+            if phase_status.get(phase_id) == status and not detail:
+                return None
+            phase_status[phase_id] = status
+            return builder.build_phase_step(
+                phase_id,
+                status,
+                title=_WRITING_PHASES.get(phase_id, phase_id),
+                detail=detail,
+            )
 
         yield builder.build_user_message(user_message)
         yield builder.build_status("running")
+        if is_chapter_writing:
+            event = build_phase("read_context", "running", "准备上下文包")
+            if event:
+                yield event
 
         try:
             if session.sdk_client is None:
@@ -395,6 +476,7 @@ class ClaudeOrchestrator:
             yield start_event
 
             pending_tool_calls: dict[str, str] = {}
+            pending_tool_phases: dict[str, str] = {}
             sdk_queue: asyncio.Queue[Any | None] = asyncio.Queue()
             drain_task = asyncio.create_task(_drain_sdk_messages(client, sdk_queue))
             last_activity_at = time.monotonic()
@@ -408,6 +490,12 @@ class ClaudeOrchestrator:
                             session.pending_question = q_event
                             waiting_for_user = True
                             last_activity_at = time.monotonic()
+                            event = build_phase("chapter_summary", "done")
+                            if event:
+                                yield event
+                            event = build_phase("user_confirm", "running", "等待用户确认")
+                            if event:
+                                yield event
                             yield builder.build_question(
                                 q_event.get("question", ""),
                                 question_id=q_event.get("question_id"),
@@ -453,6 +541,16 @@ class ClaudeOrchestrator:
                                 tool_id = block.id
                                 log.info("ToolUseBlock: name=%s, input_keys=%s", tool_name, list(tool_input.keys()) if isinstance(tool_input, dict) else "non-dict")
                                 pending_tool_calls[tool_id] = tool_name
+                                phase_id = _phase_for_tool_call(tool_name, tool_input if isinstance(tool_input, dict) else None)
+                                if phase_status.get("user_confirm") == "running" and phase_id != "user_confirm":
+                                    event = build_phase("user_confirm", "done")
+                                    if event:
+                                        yield event
+                                if phase_id:
+                                    pending_tool_phases[tool_id] = phase_id
+                                    event = build_phase(phase_id, "running")
+                                    if event:
+                                        yield event
                                 yield builder.build_tool_call_step(
                                     tool_name=tool_name,
                                     params=tool_input if isinstance(tool_input, dict) else None,
@@ -468,6 +566,7 @@ class ClaudeOrchestrator:
                                     preview = result_text[:200] if result_text else ""
 
                                     tracked_tool = pending_tool_calls.pop(tool_use_id, None)
+                                    tracked_phase = pending_tool_phases.pop(tool_use_id, None)
                                     if tracked_tool and "save_chapter" in tracked_tool and preview:
                                         try:
                                             result_data = _parse_tool_json(result_text)
@@ -498,6 +597,20 @@ class ClaudeOrchestrator:
                                         tool_name=result_tool_name,
                                         result_preview=preview,
                                     )
+                                    phase_id = tracked_phase or _phase_for_tool_call(result_tool_name)
+                                    if phase_id:
+                                        detail = None
+                                        if phase_id == "read_context":
+                                            detail = "上下文包已准备"
+                                        elif phase_id == "chapter_content":
+                                            detail = "正文生成完成"
+                                        elif phase_id == "quality_check":
+                                            detail = "检查完成"
+                                        elif phase_id == "save_chapter":
+                                            detail = "章节已保存"
+                                        event = build_phase(phase_id, "done", detail)
+                                        if event:
+                                            yield event
 
                     elif isinstance(message, ResultMessage):
                         if message.is_error:
