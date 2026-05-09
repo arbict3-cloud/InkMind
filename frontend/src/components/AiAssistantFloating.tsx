@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useI18n } from "@/i18n";
 import {
   createAgentSession,
@@ -7,17 +8,18 @@ import {
   agentAnswerQuestion,
   type AgentSession,
 } from "@/api/client";
-import type { PendingQuestionData, SseAgentStepData } from "@/types/sse";
+import type { PendingQuestionData, SseAgentStepData, SseChapterSavedData } from "@/types/sse";
 import AskUserQuestion from "@/components/AskUserQuestion";
 import AgentStepDisplay from "@/components/AgentStepDisplay";
 import type { Chapter } from "@/types";
 
 interface AgentMessage {
   id: string;
-  role: "user" | "assistant" | "system" | "error";
+  role: "user" | "assistant" | "system" | "error" | "chapter_saved";
   content: string;
   timestamp: number;
   isStreaming?: boolean;
+  savedChapter?: SseChapterSavedData;
 }
 
 export interface AiAssistantFloatingProps {
@@ -46,6 +48,23 @@ function loadJson<T>(key: string, fallback: T): T {
 
 function saveJson(key: string, value: unknown): void {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
+function stopStreamingMessages(messages: AgentMessage[]): AgentMessage[] {
+  return messages.map((message) => (
+    message.role === "assistant" && message.isStreaming
+      ? { ...message, isStreaming: false }
+      : message
+  ));
+}
+
+function sanitizeAssistantContent(content: string): string {
+  return content
+    .replace(/[（(]\s*章节\s*ID\s*[:：]\s*\d+\s*[）)]/gi, "")
+    .replace(/章节\s*ID\s*[:：]\s*\d+/gi, "")
+    .replace(/[（(]\s*chapter\s*id\s*[:：]\s*\d+\s*[）)]/gi, "")
+    .replace(/chapter\s*id\s*[:：]\s*\d+/gi, "")
+    .replace(/\s+([！!。,.，])/g, "$1");
 }
 
 function AiAssistantMark({ className = "" }: { className?: string }) {
@@ -211,10 +230,21 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       },
       onQuestion: (data: any) => {
         console.log("[Question]", data.question, data.options);
+        setMessages((prev) => stopStreamingMessages(prev));
         setPendingQuestion(data);
       },
       onChapterSaved: (data: any) => {
         console.log("[ChapterSaved]", data.id, data.title);
+        setMessages((prev) => [
+          ...stopStreamingMessages(prev),
+          {
+            id: generateId(),
+            role: "chapter_saved",
+            content: "",
+            timestamp: Date.now(),
+            savedChapter: data,
+          },
+        ]);
         window.dispatchEvent(new CustomEvent("inkmind:chapter-saved", { detail: data }));
       },
       onChapterDeleted: (data: any) => {
@@ -225,21 +255,21 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         const s = data.status || "idle";
         setStatus(s);
         if (s === "waiting_for_user") {
+          setMessages((prev) => stopStreamingMessages(prev));
           setIsLoading(false);
         } else if (s === "idle") {
+          setMessages((prev) => stopStreamingMessages(prev));
           setIsLoading(false);
         }
       },
       onDone: () => {
-        const currentAid = activeAssistantIdRef.current;
-        setMessages((prev) => prev.map((m) => m.id === currentAid ? { ...m, isStreaming: false } : m));
+        setMessages((prev) => stopStreamingMessages(prev));
         setAgentSteps((prev) => [...prev, { step_type: "finish" as const, is_parallel: false, ts: Date.now() }]);
         setIsLoading(false);
       },
       onError: (data: any) => {
-        const currentAid = activeAssistantIdRef.current;
         setMessages((prev) => [
-          ...prev.map((m) => m.id === currentAid ? { ...m, isStreaming: false } : m),
+          ...stopStreamingMessages(prev),
           { id: generateId(), role: "error", content: data.message, timestamp: Date.now() },
         ]);
         setIsLoading(false);
@@ -256,7 +286,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setPendingQuestion(null);
     setAgentSteps([]);
 
-    setMessages((prev) => [...prev, { id: generateId(), role: "user", content: text, timestamp: Date.now() }]);
+    setMessages((prev) => [...stopStreamingMessages(prev), { id: generateId(), role: "user", content: text, timestamp: Date.now() }]);
 
     try {
       const cur = await ensureSession();
@@ -296,11 +326,14 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setPendingQuestion(null);
     setIsLoading(true);
     const answerText = selectedOption || answer;
-    setMessages((prev) => [...prev, { id: generateId(), role: "user", content: answerText, timestamp: Date.now() }]);
 
     const newAid = generateId();
     activeAssistantIdRef.current = newAid;
-    setMessages((prev) => [...prev, { id: newAid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true }]);
+    setMessages((prev) => [
+      ...stopStreamingMessages(prev),
+      { id: generateId(), role: "user", content: answerText, timestamp: Date.now() },
+      { id: newAid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true },
+    ]);
 
     try {
       await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption);
@@ -313,6 +346,15 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }, [handleSend]);
+
+  const handleOpenSavedChapter = useCallback((chapter: SseChapterSavedData) => {
+    window.dispatchEvent(new CustomEvent("inkmind:chapter-saved", { detail: chapter }));
+  }, []);
+
+  const handleContinueAfterSaved = useCallback(() => {
+    setInput(t("smart_writer_suggestion_1"));
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, [t]);
 
   return (
     <>
@@ -374,14 +416,39 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
                   <div className="agent-message-content agent-message-content--user">{msg.content}</div>
                 ) : msg.role === "error" ? (
                   <div className="agent-message-content agent-message-content--error">{msg.content}</div>
+                ) : msg.role === "chapter_saved" && msg.savedChapter ? (
+                  <div className="agent-message-content agent-message-content--saved">
+                    <div className="agent-saved-card">
+                      <div className="agent-saved-card__mark" aria-hidden="true">✓</div>
+                      <div className="agent-saved-card__body">
+                        <div className="agent-saved-card__eyebrow">{t("agent_saved_card_label")}</div>
+                        <div className="agent-saved-card__title">
+                          {t("agent_saved_card_title")
+                            .replace("{chapter}", String(msg.savedChapter.chapter_number || ""))
+                            .replace("{title}", msg.savedChapter.title || t("common_untitled"))}
+                        </div>
+                        <div className="agent-saved-card__meta">
+                          {t("agent_saved_card_meta").replace("{count}", String(msg.savedChapter.word_count || 0))}
+                        </div>
+                        <div className="agent-saved-card__actions">
+                          <button type="button" onClick={() => handleOpenSavedChapter(msg.savedChapter!)}>
+                            {t("agent_saved_card_open")}
+                          </button>
+                          <button type="button" onClick={handleContinueAfterSaved}>
+                            {t("agent_saved_card_continue")}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   <div className="agent-message-content agent-message-content--assistant">
                     <div className="agent-message-avatar">
                       <AiAssistantMark className="ai-assistant-mark--avatar" />
                     </div>
                     <div className="agent-message-body">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      {msg.isStreaming && msg.content.trim() && <span className="agent-cursor">▊</span>}
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeAssistantContent(msg.content)}</ReactMarkdown>
+                      {msg.isStreaming && msg.content.trim() && <span className="agent-cursor" aria-hidden="true" />}
                     </div>
                   </div>
                 )}

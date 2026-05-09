@@ -48,7 +48,10 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
   const handleOptionClick = (opt: QuestionOption) => {
     setSelectedOption(opt);
     setCustomInput("");
-    onAnswer(question.question_id, opt.label, opt.label);
+    const cleanLabel = opt.label
+      .replace(/\s*[\(（]\s*recommended\s*[\)）]\s*$/i, "")
+      .trim();
+    onAnswer(question.question_id, cleanLabel, cleanLabel);
   };
 
   const handleCustomSubmit = () => {

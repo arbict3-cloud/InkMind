@@ -140,6 +140,10 @@ def sse_agent_step(
     tool_params: dict[str, Any] | None = None,
     thought: str | None = None,
     result_preview: str | None = None,
+    phase_id: str | None = None,
+    phase_status: str | None = None,
+    phase_title: str | None = None,
+    phase_detail: str | None = None,
     step_number: int | None = None,
     total_steps: int | None = None,
     is_parallel: bool = False,
@@ -156,6 +160,14 @@ def sse_agent_step(
         data["thought"] = thought
     if result_preview:
         data["result_preview"] = result_preview
+    if phase_id:
+        data["phase_id"] = phase_id
+    if phase_status:
+        data["phase_status"] = phase_status
+    if phase_title:
+        data["phase_title"] = phase_title
+    if phase_detail:
+        data["phase_detail"] = phase_detail
     if step_number is not None:
         data["step_number"] = step_number
     if total_steps is not None:
@@ -174,19 +186,23 @@ def sse_error(*, message: str, code: str | None = None) -> SseEvent:
 def sse_chapter_saved(
     *,
     chapter_id: int,
+    chapter_number: int | None = None,
     title: str,
     novel_id: int,
     word_count: int = 0,
 ) -> SseEvent:
+    data = {
+        "id": chapter_id,
+        "title": title,
+        "novel_id": novel_id,
+        "word_count": word_count,
+        "ts": time.time(),
+    }
+    if chapter_number is not None:
+        data["chapter_number"] = chapter_number
     return SseEvent(
         event_type="chapter_saved",
-        data={
-            "id": chapter_id,
-            "title": title,
-            "novel_id": novel_id,
-            "word_count": word_count,
-            "ts": time.time(),
-        },
+        data=data,
     )
 
 
@@ -302,6 +318,22 @@ class SseStreamBuilder:
             result_preview=result_preview,
         )
 
+    def build_phase_step(
+        self,
+        phase_id: str,
+        phase_status: str,
+        *,
+        title: str | None = None,
+        detail: str | None = None,
+    ) -> SseEvent:
+        return sse_agent_step(
+            step_type="phase",
+            phase_id=phase_id,
+            phase_status=phase_status,
+            phase_title=title,
+            phase_detail=detail,
+        )
+
     def build_generation_start(self) -> SseEvent:
         self._step_number += 1
         return sse_agent_step(
@@ -348,12 +380,14 @@ class SseStreamBuilder:
         self,
         *,
         chapter_id: int,
+        chapter_number: int | None = None,
         title: str,
         novel_id: int,
         word_count: int = 0,
     ) -> SseEvent:
         return sse_chapter_saved(
             chapter_id=chapter_id,
+            chapter_number=chapter_number,
             title=title,
             novel_id=novel_id,
             word_count=word_count,
