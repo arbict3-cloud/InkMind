@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { Modal } from "antd";
 import {
   apiErrorMessage,
   compareVersionWithCurrent,
@@ -597,6 +598,20 @@ export default function NovelWrite() {
   const hasBody = (content || "").trim().length > 0;
   const hasLlm = llmOptions.length > 0;
 
+  const confirmAction = useCallback((message: string) => (
+    new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: t("common_confirm"),
+        content: message,
+        okText: t("common_confirm"),
+        cancelText: t("common_cancel"),
+        centered: true,
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    })
+  ), [t]);
+
   function captureSelection(): { start: number; end: number } | null {
     const ta = bodyTextareaRef.current;
     if (!ta) return null;
@@ -766,7 +781,7 @@ export default function NovelWrite() {
     const confirmMsg = saveCurrent
       ? t("write_confirm_rollback_save")
       : t("write_confirm_rollback_discard");
-    if (!window.confirm(confirmMsg)) return;
+    if (!(await confirmAction(confirmMsg))) return;
     
     setVersionActionLoading(true);
     setErr("");
@@ -815,8 +830,13 @@ export default function NovelWrite() {
       const endPt = getCaretViewportPoint(t, cur.end);
       const startPt = getCaretViewportPoint(t, cur.start);
       const anchorTop = Math.min(endPt.top, startPt.top);
-      const anchorLeft = endPt.left;
-      setSelectionMenuPos({ top: anchorTop - 8, left: anchorLeft });
+      const viewportPadding = 16;
+      const selectionCenter = (startPt.left + endPt.left) / 2;
+      const anchorLeft = Math.min(
+        window.innerWidth - viewportPadding,
+        Math.max(viewportPadding, selectionCenter)
+      );
+      setSelectionMenuPos({ top: Math.max(viewportPadding, anchorTop - 10), left: anchorLeft });
     };
     update();
     ta.addEventListener("scroll", update);
@@ -949,7 +969,7 @@ export default function NovelWrite() {
 
   async function onDeleteChapterById(cid: number) {
     const nid = id;
-    if (!window.confirm(t("write_confirm_delete_chapter"))) return;
+    if (!(await confirmAction(t("write_confirm_delete_chapter")))) return;
     setErr("");
     try {
       await flushSave();
@@ -1042,7 +1062,7 @@ export default function NovelWrite() {
     }
     if (!activeId) return;
     if (hasBody) {
-      const ok = window.confirm(t("write_confirm_regenerate"));
+      const ok = await confirmAction(t("write_confirm_regenerate"));
       if (!ok) return;
     }
     preGenerateSnapshotRef.current = { title, summary, content };
@@ -1407,6 +1427,7 @@ export default function NovelWrite() {
       setErr(t("write_err_evaluate_needs_body"));
       return;
     }
+    if (!(await confirmAction(t("write_confirm_evaluate_chapter")))) return;
     setEvaluateBusy(true);
     setErr("");
     setEvaluateResult(null);
@@ -2333,16 +2354,15 @@ export default function NovelWrite() {
             ) : null}
 
             {rightTool === "versions" && activeId ? (
-              <div className="write-ai-section">
-                <div style={{ marginBottom: "1rem" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
-                    <span className="muted" style={{ fontSize: "0.85rem" }}>
+              <div className="write-ai-section write-version-section">
+                <div className="write-version-panel-inner">
+                  <div className="write-version-toolbar">
+                    <span className="muted">
                       {t("write_version_count").replace("{count}", String(versions.length))}
                     </span>
                     <button
                       type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: "0.8rem", padding: "0.25rem 0.5rem" }}
+                      className="write-version-refresh"
                       disabled={versionsLoading}
                       onClick={() => loadVersions()}
                     >
@@ -2359,33 +2379,26 @@ export default function NovelWrite() {
                       {t("write_no_versions")}
                     </p>
                   ) : (
-                    <div style={{ maxHeight: "400px", overflowY: "auto" }}>
-                      <div className="stack-sm">
+                    <div className="write-version-list">
+                      <div className="write-version-stack">
                         {versions.map((v) => (
                           <div
                             key={v.id}
-                            className={`card version-item${selectedVersion?.id === v.id ? " version-item--active" : ""}`}
-                            style={{ padding: "0.75rem", cursor: "pointer" }}
+                            className={`version-item${selectedVersion?.id === v.id ? " version-item--active" : ""}`}
                             onClick={() => {
                               setSelectedVersion(v);
                               setVersionDiff(null);
                             }}
                           >
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
-                                  <strong style={{ fontSize: "0.9rem" }}>
+                            <div className="version-item__main">
+                              <div className="version-item__content">
+                                <div className="version-item__head">
+                                  <strong>
                                     {t("write_version_n")} {v.version_number}
                                   </strong>
                                   <span
                                     className="version-type-badge"
-                                    style={{
-                                      fontSize: "0.7rem",
-                                      padding: "0.125rem 0.375rem",
-                                      borderRadius: "4px",
-                                      backgroundColor: v.change_type.startsWith("ai") || v.change_type.startsWith("selection") ? "var(--info-bg)" : "var(--bg-hover)",
-                                      color: v.change_type.startsWith("ai") || v.change_type.startsWith("selection") ? "var(--info)" : "var(--muted)",
-                                    }}
+                                    data-ai={v.change_type.startsWith("ai") || v.change_type.startsWith("selection")}
                                   >
                                     {v.change_type === "manual" && t("write_change_manual")}
                                     {v.change_type === "ai_generate" && t("write_change_ai_gen")}
@@ -2399,26 +2412,23 @@ export default function NovelWrite() {
                                   </span>
                                 </div>
                                 {v.title && (
-                                  <p style={{ margin: "0.25rem 0", fontSize: "0.85rem", color: "var(--muted)" }}>
+                                  <p className="version-item__title">
                                     {t("write_version_title").replace("{title}", v.title.length > 30 ? v.title.slice(0, 30) + "…" : v.title)}
                                   </p>
                                 )}
-                                <p style={{ margin: "0.25rem 0", fontSize: "0.8rem", color: "var(--muted)" }}>
-                                  {new Date(v.created_at).toLocaleString()}
-                                </p>
-                                <p style={{ margin: "0.25rem 0", fontSize: "0.75rem", color: "var(--muted)" }}>
-                                  {t("write_version_word_count").replace("{count}", String(v.content.replace(/\s/g, "").length))}
-                                </p>
+                                <div className="version-item__meta">
+                                  <span>{new Date(v.created_at).toLocaleString()}</span>
+                                  <span>{t("write_version_word_count").replace("{count}", String(v.content.replace(/\s/g, "").length))}</span>
+                                </div>
                               </div>
                             </div>
                             
                             {selectedVersion?.id === v.id && (
-                              <div style={{ marginTop: "0.75rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border)" }}>
-                                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+                              <div className="version-item__actions">
+                                <div className="version-item__button-row">
                                   <button
                                     type="button"
-                                    className="btn btn-ghost"
-                                    style={{ fontSize: "0.8rem", padding: "0.25rem 0.5rem" }}
+                                    className="write-version-action"
                                     disabled={versionDiffLoading || versionActionLoading}
                                     onClick={() => compareSelectedVersionWithCurrent(v.id)}
                                   >
@@ -2426,8 +2436,7 @@ export default function NovelWrite() {
                                   </button>
                                   <button
                                     type="button"
-                                    className="btn"
-                                    style={{ fontSize: "0.8rem", padding: "0.25rem 0.5rem" }}
+                                    className="write-version-action"
                                     disabled={versionActionLoading}
                                     onClick={() => handleRollback(v.id, true)}
                                   >
@@ -2435,8 +2444,7 @@ export default function NovelWrite() {
                                   </button>
                                   <button
                                     type="button"
-                                    className="btn btn-danger"
-                                    style={{ fontSize: "0.8rem", padding: "0.25rem 0.5rem" }}
+                                    className="write-version-action write-version-action--danger"
                                     disabled={versionActionLoading}
                                     onClick={() => handleRollback(v.id, false)}
                                   >

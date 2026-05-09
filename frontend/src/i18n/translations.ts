@@ -637,6 +637,7 @@ export const translations: Record<Language, Record<string, string>> = {
     write_evaluate_score: "去AI化评分",
     write_deai_score_desc: "AI 痕迹评分",
     write_eval_issue_separator: "：",
+    write_confirm_evaluate_chapter: "评估会调用 AI 并消耗 Token，确定要评估当前章节吗？",
     write_evaluate_issues: "问题点",
     write_evaluate_no_issues: "未发现明显问题",
     
@@ -1692,6 +1693,7 @@ export const translations: Record<Language, Record<string, string>> = {
     write_evaluate_score: "De-AI Score",
     write_deai_score_desc: "AI trace score",
     write_eval_issue_separator: ": ",
+    write_confirm_evaluate_chapter: "Evaluation will call AI and consume tokens. Evaluate the current chapter?",
     write_evaluate_issues: "Issues",
     write_evaluate_no_issues: "No obvious issues found",
     
