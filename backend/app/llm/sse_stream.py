@@ -186,19 +186,23 @@ def sse_error(*, message: str, code: str | None = None) -> SseEvent:
 def sse_chapter_saved(
     *,
     chapter_id: int,
+    chapter_number: int | None = None,
     title: str,
     novel_id: int,
     word_count: int = 0,
 ) -> SseEvent:
+    data = {
+        "id": chapter_id,
+        "title": title,
+        "novel_id": novel_id,
+        "word_count": word_count,
+        "ts": time.time(),
+    }
+    if chapter_number is not None:
+        data["chapter_number"] = chapter_number
     return SseEvent(
         event_type="chapter_saved",
-        data={
-            "id": chapter_id,
-            "title": title,
-            "novel_id": novel_id,
-            "word_count": word_count,
-            "ts": time.time(),
-        },
+        data=data,
     )
 
 
@@ -376,12 +380,14 @@ class SseStreamBuilder:
         self,
         *,
         chapter_id: int,
+        chapter_number: int | None = None,
         title: str,
         novel_id: int,
         word_count: int = 0,
     ) -> SseEvent:
         return sse_chapter_saved(
             chapter_id=chapter_id,
+            chapter_number=chapter_number,
             title=title,
             novel_id=novel_id,
             word_count=word_count,

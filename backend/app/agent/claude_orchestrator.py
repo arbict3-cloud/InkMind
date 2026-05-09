@@ -178,8 +178,8 @@ def _resolve_user_input(question_id: str, answers: dict[str, str]) -> bool:
     return True
 
 
-def _build_mcp_server(novel_id: int) -> dict[str, Any]:
-    init_tool_context(SessionLocal, novel_id)
+def _build_mcp_server(novel_id: int, session_id: str = "") -> dict[str, Any]:
+    init_tool_context(SessionLocal, novel_id, session_id)
     return create_sdk_mcp_server(
         name="inkmind",
         version="1.0.0",
@@ -290,11 +290,12 @@ async def _pre_tool_use_hook(
 
 def _build_agent_options(novel_id: int, session_id: str = "") -> ClaudeAgentOptions:
     from claude_agent_sdk.types import HookMatcher
-    mcp_server = _build_mcp_server(novel_id)
+    mcp_server = _build_mcp_server(novel_id, session_id)
     options_kwargs: dict[str, Any] = {
         "system_prompt": _ORCHESTRATOR_SYSTEM_PROMPT,
         "mcp_servers": {"inkmind": mcp_server},
         "allowed_tools": ALL_TOOL_NAMES + ["AskUserQuestion"],
+        "disallowed_tools": ["Bash", "Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch"],
         "permission_mode": settings.agent_permission_mode,
         "max_turns": settings.agent_max_turns,
         "can_use_tool": _can_use_tool,
@@ -446,6 +447,7 @@ class ClaudeOrchestrator:
                 yield event
 
         try:
+            init_tool_context(SessionLocal, session.novel_id, session.session_id)
             if session.sdk_client is None:
                 yield builder.build_tool_call_step(
                     tool_name="agent_connect",
@@ -573,6 +575,7 @@ class ClaudeOrchestrator:
                                             if result_data.get("success"):
                                                 yield builder.build_chapter_saved(
                                                     chapter_id=result_data["chapter_id"],
+                                                    chapter_number=result_data.get("chapter_number"),
                                                     title=result_data.get("title", ""),
                                                     novel_id=session.novel_id,
                                                     word_count=result_data.get("word_count", 0),

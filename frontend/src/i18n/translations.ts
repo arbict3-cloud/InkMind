@@ -1038,6 +1038,11 @@ export const translations: Record<Language, Record<string, string>> = {
     agent_phase_chapter_content: "生成正文",
     agent_phase_quality_check: "质量检查",
     agent_phase_save_chapter: "保存章节",
+    agent_saved_card_label: "章节已保存",
+    agent_saved_card_title: "第 {chapter} 章《{title}》",
+    agent_saved_card_meta: "约 {count} 字，已加入章节列表",
+    agent_saved_card_open: "打开章节",
+    agent_saved_card_continue: "继续写下一章",
   },
   en: {
     app_name: "InkMind",
@@ -2070,5 +2075,10 @@ export const translations: Record<Language, Record<string, string>> = {
     agent_phase_chapter_content: "Generate chapter",
     agent_phase_quality_check: "Quality check",
     agent_phase_save_chapter: "Save chapter",
+    agent_saved_card_label: "Chapter saved",
+    agent_saved_card_title: "Chapter {chapter}: {title}",
+    agent_saved_card_meta: "About {count} words, added to chapter list",
+    agent_saved_card_open: "Open chapter",
+    agent_saved_card_continue: "Continue next chapter",
   },
 };

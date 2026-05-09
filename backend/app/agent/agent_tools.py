@@ -32,13 +32,16 @@ log = logging.getLogger(__name__)
 
 _db_session_factory: Any = None
 _novel_id: int = 0
+_session_id: str = ""
 _DEFAULT_TARGET_WORD_COUNT = 1800
+_CONTEXT_PACK_CACHE: dict[str, dict[str, Any]] = {}
 
 
-def init_tool_context(db_session_factory: Any, novel_id: int) -> None:
-    global _db_session_factory, _novel_id
+def init_tool_context(db_session_factory: Any, novel_id: int, session_id: str = "") -> None:
+    global _db_session_factory, _novel_id, _session_id
     _db_session_factory = db_session_factory
     _novel_id = novel_id
+    _session_id = session_id
 
 
 def _get_db() -> Session:
@@ -79,6 +82,14 @@ def _extract_target_word_count(value: Any) -> int:
     if 800 <= parsed <= 5000:
         return parsed
     return _DEFAULT_TARGET_WORD_COUNT
+
+
+def _context_pack_cache_key() -> str:
+    return f"{_session_id or 'default'}:{_novel_id}"
+
+
+def _invalidate_context_pack_cache() -> None:
+    _CONTEXT_PACK_CACHE.pop(_context_pack_cache_key(), None)
 
 
 def _build_writing_context_pack(
@@ -164,6 +175,31 @@ def _build_writing_context_pack(
             "notes": [_clip_text(item["body"], 180) for item in constraints[:6] if item["body"]],
         },
     }
+
+
+def _get_cached_writing_context_pack(
+    db: Session,
+    novel: Novel,
+    *,
+    target_word_count: Any = None,
+    chapter_summary_hint: Any = None,
+) -> dict[str, Any]:
+    key = _context_pack_cache_key()
+    requested_target = _extract_target_word_count(target_word_count)
+    cached = _CONTEXT_PACK_CACHE.get(key)
+    if cached:
+        cached_target = cached.get("style_constraints", {}).get("target_word_count")
+        if cached_target == requested_target:
+            return cached
+
+    pack = _build_writing_context_pack(
+        db,
+        novel,
+        target_word_count=requested_target,
+        chapter_summary_hint=chapter_summary_hint,
+    )
+    _CONTEXT_PACK_CACHE[key] = pack
+    return pack
 
 
 @tool("get_novel_state", "获取小说的当前状态：基本信息、章节数量、最近章节概要、人物数量等。用于了解项目进度。", {})
@@ -329,7 +365,7 @@ async def get_writing_context_pack(args: dict[str, Any]) -> dict[str, Any]:
     if novel is None:
         db.close()
         raise ValueError(f"小说 {_novel_id} 不存在")
-    result = _build_writing_context_pack(
+    result = _get_cached_writing_context_pack(
         db,
         novel,
         target_word_count=args.get("target_word_count"),
@@ -405,7 +441,7 @@ async def dispatch_generation_task(args: dict[str, Any]) -> dict[str, Any]:
         try:
             novel = db.query(Novel).filter(Novel.id == _novel_id).first()
             if novel is not None:
-                params["context_pack"] = _build_writing_context_pack(
+                params["context_pack"] = _get_cached_writing_context_pack(
                     db,
                     novel,
                     target_word_count=params.get("word_count"),
@@ -521,6 +557,7 @@ async def save_chapter(args: dict[str, Any]) -> dict[str, Any]:
         "title": chapter.title,
         "word_count": len(content),
     }
+    _invalidate_context_pack_cache()
     db.close()
     return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
 
@@ -547,6 +584,7 @@ async def delete_chapter(args: dict[str, Any]) -> dict[str, Any]:
     db.delete(chapter)
     db.commit()
     db.close()
+    _invalidate_context_pack_cache()
 
     return {"content": [{"type": "text", "text": json.dumps({"success": True, "chapter_id": chapter_id, "title": title}, ensure_ascii=False, indent=2)}]}
 

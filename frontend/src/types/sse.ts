@@ -80,6 +80,7 @@ export interface SseErrorData {
 
 export interface SseChapterSavedData {
   id: number;
+  chapter_number?: number;
   title: string;
   novel_id: number;
   word_count: number;
