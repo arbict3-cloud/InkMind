@@ -4,7 +4,7 @@
 
 # InkMind
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-red.svg)](LICENSE)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green.svg)](https://fastapi.tiangolo.com/)
@@ -98,7 +98,7 @@ AI 评估当前章节存在的问题与不足，给出具体改进建议。
 
 ### 环境要求
 
-- **Python** 3.10+
+- **Python** 3.12+
 - **Node.js** 18+
 
 ### 1. 克隆项目

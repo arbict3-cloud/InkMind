@@ -56,11 +56,15 @@ jobs:
             docker compose build || { echo "ERROR: docker compose build failed"; exit 1; }
 
             echo "=== [4/5] 启动服务 ==="
-            docker compose up -d --remove-orphans || { echo "ERROR: docker compose up failed"; exit 1; }
+            docker compose up -d --remove-orphans || {
+              echo "ERROR: docker compose up failed，查看后端日志："
+              docker compose logs backend --tail=100 2>/dev/null || true
+              exit 1
+            }
             docker image prune -f
 
             echo "=== [5/5] 健康检查 ==="
-            for i in $(seq 1 20); do
+            for i in $(seq 1 30); do
               if curl -sf http://127.0.0.1/health >/dev/null 2>&1; then
                 echo "部署成功！"
                 exit 0
@@ -70,5 +74,6 @@ jobs:
             done
             echo ""
             echo "健康检查失败，查看日志："
-            docker compose logs --tail=50
+            docker compose logs backend --tail=100 2>/dev/null || true
+            docker compose logs frontend --tail=50 2>/dev/null || true
             exit 1
