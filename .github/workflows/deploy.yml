@@ -25,9 +25,13 @@ jobs:
             echo "=== [1/5] 拉取代码 ==="
             if [ ! -d ".git" ]; then
               rm -rf ${DEPLOY_PATH:?}/*
-              git clone https://github.com/${{ github.repository }}.git . || { echo "ERROR: git clone failed"; exit 1; }
+              git config --global http.postBuffer 524288000
+              git config --global http.lowSpeedLimit 1000
+              git config --global http.lowSpeedTime 60
+              git clone --depth 1 https://github.com/${{ github.repository }}.git . || { echo "ERROR: git clone failed"; exit 1; }
             fi
-            git fetch origin main || { echo "ERROR: git fetch failed"; exit 1; }
+            git config --global http.postBuffer 524288000
+            git fetch --depth 1 origin main || { echo "ERROR: git fetch failed"; exit 1; }
             git reset --hard origin/main || { echo "ERROR: git reset failed"; exit 1; }
             echo "代码版本: $(git log --oneline -1)"
 
