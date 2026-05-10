@@ -72,8 +72,8 @@ mkdir -p /etc/docker
 cat > /etc/docker/daemon.json << 'EOF'
 {
   "registry-mirrors": [
-    "https://mirror.ccs.tencentyun.com",
-    "https://docker.mirrors.ustc.edu.cn"
+    "https://docker.1ms.run",
+    "https://docker.xuanyuan.me"
   ],
   "log-driver": "json-file",
   "log-opts": {
