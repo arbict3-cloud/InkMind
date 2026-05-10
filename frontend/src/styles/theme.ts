@@ -505,8 +505,6 @@ export function getThemeConfig(theme: ThemeId): ThemeConfig {
   switch (theme) {
     case "dark":
       return inkMindDarkTheme;
-    case "sepia":
-      return inkMindSepiaTheme;
     case "light":
     default:
       return inkMindLightTheme;

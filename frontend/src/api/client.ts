@@ -437,7 +437,7 @@ export async function chapterSelectionAi(
   novelId: number,
   chapterId: number,
   payload: {
-    mode: "expand" | "polish";
+    mode: "rewrite" | "expand" | "polish" | "append";
     selected_text: string;
     chapter_content: string;
     llm_provider?: string | null;

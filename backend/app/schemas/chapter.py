@@ -150,8 +150,11 @@ class ChapterEvaluateIn(BaseModel):
 
 
 class ChapterSelectionAiIn(BaseModel):
-    """正文选区：扩写或润色。chapter_content 为当前编辑器全文，用于校验选区。"""
-    mode: Literal["expand", "polish"] = Field(..., description="expand=扩写；polish=润色")
+    """正文选区：改写、扩写、润色或续写。chapter_content 为当前编辑器全文，用于校验选区。"""
+    mode: Literal["rewrite", "expand", "polish", "append"] = Field(
+        ...,
+        description="rewrite=改写；expand=扩写；polish=润色；append=续写",
+    )
     selected_text: str = Field(..., min_length=1, max_length=8000, description="选中的片段")
     chapter_content: str = Field(
         ...,

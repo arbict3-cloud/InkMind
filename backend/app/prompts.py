@@ -116,9 +116,17 @@ PROMPTS: dict[str, dict[str, str]] = {
         "zh": "你是小说作者。用户选中了文中一段文字，请对其进行扩写。保持与全书类型、文风一致、情节连贯；增加细节、描写或节奏，使片段更丰满。只输出扩写后的正文片段，不要解释、不要前后缀、不要引用说明。",
         "en": "You are a novel author. The user has selected a passage and wants you to expand it. Maintain consistency with the novel's genre, writing style, and plot continuity; add details, descriptions, or pacing to make the fragment richer. Output only the expanded text fragment, no explanations, no prefix/suffix, no quoted references. [CRITICAL] Output in ENGLISH ONLY.",
     },
+    "selection_rewrite_system": {
+        "zh": "你是小说作者。用户选中了文中一段文字，请对其进行改写。保留核心事实、人物关系与剧情作用，但可以重组句式、节奏和表达，让片段更自然、更有小说感。只输出改写后的正文片段，不要解释、不要前后缀。",
+        "en": "You are a novel author. The user has selected a passage and wants you to rewrite it. Preserve the core facts, relationships, and plot function, while improving structure, rhythm, and expression. Output only the rewritten text fragment, no explanations or prefix/suffix. [CRITICAL] Output in ENGLISH ONLY.",
+    },
     "selection_polish_system": {
         "zh": "你是小说编辑。用户选中了文中一段文字，请对其进行润色。保持原意与叙事节奏，优化句式、用词与节奏；避免口水套话与模板化表达。只输出润色后的正文片段，不要解释、不要前后缀。",
         "en": "You are a novel editor. The user has selected a passage and wants you to polish it. Maintain the original meaning and narrative rhythm; optimize sentence structure, word choice, and pacing; avoid clichés and template expressions. Output only the polished text fragment, no explanations, no prefix/suffix. [CRITICAL] Output in ENGLISH ONLY.",
+    },
+    "selection_append_system": {
+        "zh": "你是小说作者。用户选中了文中一段文字，请基于这段文字续写其后的自然延展。保持与上下文、人物行动和文风一致，只输出可直接插入在选中片段之后的续写正文，不要重复选中片段，不要解释。",
+        "en": "You are a novel author. The user selected a passage and wants a natural continuation after it. Keep consistency with context, character actions, and style. Output only the continuation that can be inserted after the selected passage. Do not repeat the selected text or explain. [CRITICAL] Output in ENGLISH ONLY.",
     },
     "selection_overview": {
         "zh": "【作品】{title}\n【类型】{genre}\n【文风】{writing_style}\n【章节标题】{chapter_title}\n【本章概要】\n{chapter_summary}\n",
@@ -136,9 +144,17 @@ PROMPTS: dict[str, dict[str, str]] = {
         "zh": "请只输出扩写后的正文片段，不要包含标题或说明。",
         "en": "Please output only the expanded text fragment, do not include titles or explanations.",
     },
+    "selection_rewrite_closing": {
+        "zh": "请只输出改写后的正文片段。",
+        "en": "Please output only the rewritten text fragment.",
+    },
     "selection_polish_closing": {
         "zh": "请只输出润色后的正文片段。",
         "en": "Please output only the polished text fragment.",
+    },
+    "selection_append_closing": {
+        "zh": "请只输出续写正文，不要重复选中片段。",
+        "en": "Please output only the continuation text, and do not repeat the selected passage.",
     },
     "summarize_body_system": {
         "zh": "你是文学编辑。请用尽量简短的 1～4 句简体中文概括本章正文要点，不要加标题、编号或引号，不要评价文笔。",

@@ -27,12 +27,16 @@ export interface AiAssistantFloatingProps {
   onChapterSaved?: (chapter: Partial<Chapter> & { id: number; title: string }) => void;
 }
 
-const POSITION_KEY = "inkmind_ai_position";
-const DEFAULT_POSITION = { x: -16, y: 72 };
-const PANEL_SIZE_KEY = "inkmind_ai_panel_size";
-const DEFAULT_PANEL_SIZE = { width: 520, height: 780 };
-const MIN_PANEL_SIZE = { width: 340, height: 400 };
 const SESSION_KEY = "inkmind_agent_session";
+const PANEL_WIDTH_KEY = "inkmind_ai_panel_width";
+const PANEL_RECT_KEY = "inkmind_ai_panel_rect";
+const ICON_POS_KEY = "inkmind_ai_icon_pos";
+const DEFAULT_PANEL_WIDTH = 400;
+const DEFAULT_PANEL_HEIGHT = 640;
+const MIN_PANEL_WIDTH = 340;
+const MAX_PANEL_WIDTH = 620;
+const MIN_PANEL_HEIGHT = 420;
+const PANEL_MARGIN = 18;
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -48,6 +52,58 @@ function loadJson<T>(key: string, fallback: T): T {
 
 function saveJson(key: string, value: unknown): void {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
+function clampPanelWidth(width: number): number {
+  const viewportMax = typeof window === "undefined" ? MAX_PANEL_WIDTH : window.innerWidth - 120;
+  const maxWidth = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, viewportMax));
+  return Math.min(maxWidth, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
+}
+
+type PanelRect = { left: number; top: number; width: number; height: number };
+type IconPos = { left: number; top: number };
+type PanelResizeMode = "left" | "nw" | "ne" | "sw" | "se";
+
+function defaultPanelRect(): PanelRect {
+  if (typeof window === "undefined") {
+    return { left: 960, top: 80, width: DEFAULT_PANEL_WIDTH, height: DEFAULT_PANEL_HEIGHT };
+  }
+  const width = clampPanelWidth(loadJson(PANEL_WIDTH_KEY, DEFAULT_PANEL_WIDTH));
+  const height = Math.min(DEFAULT_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, window.innerHeight - 140));
+  return {
+    left: Math.max(PANEL_MARGIN, window.innerWidth - width - 28),
+    top: Math.max(PANEL_MARGIN, window.innerHeight - height - 28),
+    width,
+    height,
+  };
+}
+
+function clampPanelRect(rect: PanelRect): PanelRect {
+  if (typeof window === "undefined") return rect;
+  const maxWidth = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, window.innerWidth - PANEL_MARGIN * 2));
+  const width = Math.min(maxWidth, Math.max(MIN_PANEL_WIDTH, Math.round(rect.width)));
+  const maxHeight = Math.max(MIN_PANEL_HEIGHT, window.innerHeight - PANEL_MARGIN * 2);
+  const height = Math.min(maxHeight, Math.max(MIN_PANEL_HEIGHT, Math.round(rect.height)));
+  const left = Math.min(window.innerWidth - width - PANEL_MARGIN, Math.max(PANEL_MARGIN, Math.round(rect.left)));
+  const top = Math.min(window.innerHeight - height - PANEL_MARGIN, Math.max(PANEL_MARGIN, Math.round(rect.top)));
+  return { left, top, width, height };
+}
+
+function defaultIconPos(): IconPos {
+  if (typeof window === "undefined") return { left: 24, top: 420 };
+  return {
+    left: Math.max(PANEL_MARGIN, window.innerWidth - 156),
+    top: Math.max(PANEL_MARGIN, Math.min(window.innerHeight - 74, Math.round(window.innerHeight * 0.5))),
+  };
+}
+
+function clampIconPos(pos: IconPos): IconPos {
+  if (typeof window === "undefined") return pos;
+  const iconWidth = window.innerWidth <= 480 ? 48 : 138;
+  return {
+    left: Math.min(window.innerWidth - iconWidth - PANEL_MARGIN, Math.max(PANEL_MARGIN, Math.round(pos.left))),
+    top: Math.min(window.innerHeight - 56 - PANEL_MARGIN, Math.max(PANEL_MARGIN, Math.round(pos.top))),
+  };
 }
 
 function stopStreamingMessages(messages: AgentMessage[]): AgentMessage[] {
@@ -92,17 +148,175 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const initializedRef = useRef(false);
   const activeAssistantIdRef = useRef<string>("");
-
-  const [position, setPosition] = useState(() => loadJson(POSITION_KEY, DEFAULT_POSITION));
-  const [panelSize, setPanelSize] = useState(() => loadJson(PANEL_SIZE_KEY, DEFAULT_PANEL_SIZE));
-  const [isDragging, setIsDragging] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
-  const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-  const resizeRef = useRef<{ x: number; y: number; w: number; h: number; px: number; py: number; corner: string } | null>(null);
+  const resizeRef = useRef<{
+    startX: number;
+    startY: number;
+    startRect: PanelRect;
+    mode: PanelResizeMode;
+  } | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; startRect: PanelRect } | null>(null);
+  const iconDragRef = useRef<{ startX: number; startY: number; startPos: IconPos; moved: boolean } | null>(null);
+  const [panelRect, setPanelRect] = useState<PanelRect>(() => clampPanelRect(loadJson(PANEL_RECT_KEY, defaultPanelRect())));
+  const [iconPos, setIconPos] = useState<IconPos>(() => clampIconPos(loadJson(ICON_POS_KEY, defaultIconPos())));
+  const [isPanelResizing, setIsPanelResizing] = useState(false);
+  const [isPanelDragging, setIsPanelDragging] = useState(false);
+  const [isIconDragging, setIsIconDragging] = useState(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, agentSteps]);
+
+  useEffect(() => {
+    document.body.classList.toggle("ai-assistant-is-resizing", isPanelResizing);
+    if (!isPanelResizing) return;
+
+    const handleMove = (event: PointerEvent) => {
+      if (!resizeRef.current) return;
+      const { startX, startY, startRect, mode } = resizeRef.current;
+      const deltaX = event.clientX - startX;
+      const deltaY = event.clientY - startY;
+      if (mode === "left") {
+        setPanelRect(clampPanelRect({
+          ...startRect,
+          left: startRect.left + deltaX,
+          width: startRect.width - deltaX,
+        }));
+      } else if (mode === "se") {
+        setPanelRect(clampPanelRect({
+          ...startRect,
+          width: startRect.width + deltaX,
+          height: startRect.height + deltaY,
+        }));
+      } else if (mode === "sw") {
+        setPanelRect(clampPanelRect({
+          ...startRect,
+          left: startRect.left + deltaX,
+          width: startRect.width - deltaX,
+          height: startRect.height + deltaY,
+        }));
+      } else if (mode === "ne") {
+        setPanelRect(clampPanelRect({
+          ...startRect,
+          top: startRect.top + deltaY,
+          width: startRect.width + deltaX,
+          height: startRect.height - deltaY,
+        }));
+      } else {
+        setPanelRect(clampPanelRect({
+          ...startRect,
+          left: startRect.left + deltaX,
+          top: startRect.top + deltaY,
+          width: startRect.width - deltaX,
+          height: startRect.height - deltaY,
+        }));
+      }
+    };
+
+    const handleUp = () => {
+      setIsPanelResizing(false);
+      resizeRef.current = null;
+      setPanelRect((current) => {
+        const next = clampPanelRect(current);
+        saveJson(PANEL_WIDTH_KEY, next.width);
+        saveJson(PANEL_RECT_KEY, next);
+        return next;
+      });
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      document.body.classList.remove("ai-assistant-is-resizing");
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [isPanelResizing]);
+
+  useEffect(() => {
+    document.body.classList.toggle("ai-assistant-is-dragging", isPanelDragging);
+    if (!isPanelDragging) return;
+
+    const handleMove = (event: PointerEvent) => {
+      if (!dragRef.current) return;
+      const { startX, startY, startRect } = dragRef.current;
+      setPanelRect(clampPanelRect({
+        ...startRect,
+        left: startRect.left + event.clientX - startX,
+        top: startRect.top + event.clientY - startY,
+      }));
+    };
+
+    const handleUp = () => {
+      setIsPanelDragging(false);
+      dragRef.current = null;
+      setPanelRect((current) => {
+        const next = clampPanelRect(current);
+        saveJson(PANEL_RECT_KEY, next);
+        return next;
+      });
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      document.body.classList.remove("ai-assistant-is-dragging");
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [isPanelDragging]);
+
+  useEffect(() => {
+    document.body.classList.toggle("ai-assistant-is-dragging", isIconDragging);
+    if (!isIconDragging) return;
+
+    const handleMove = (event: PointerEvent) => {
+      if (!iconDragRef.current) return;
+      const deltaX = event.clientX - iconDragRef.current.startX;
+      const deltaY = event.clientY - iconDragRef.current.startY;
+      if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+        iconDragRef.current.moved = true;
+      }
+      setIconPos(clampIconPos({
+        left: iconDragRef.current.startPos.left + deltaX,
+        top: iconDragRef.current.startPos.top + deltaY,
+      }));
+    };
+
+    const handleUp = () => {
+      const moved = iconDragRef.current?.moved ?? false;
+      setIsIconDragging(false);
+      iconDragRef.current = null;
+      setIconPos((current) => {
+        const next = clampIconPos(current);
+        saveJson(ICON_POS_KEY, next);
+        return next;
+      });
+      if (!moved) setIsOpen(true);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      document.body.classList.remove("ai-assistant-is-dragging");
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [isIconDragging]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setPanelRect((current) => clampPanelRect(current));
+      setIconPos((current) => clampIconPos(current));
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   useEffect(() => {
     if (!isOpen || !novelId || initializedRef.current) return;
@@ -129,85 +343,6 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setSession(null);
     try { localStorage.removeItem(`${SESSION_KEY}_${novelId}`); } catch { /* ignore */ }
   }, [novelId]);
-
-  const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
-    dragRef.current = { x: cx, y: cy, px: position.x, py: position.y };
-    setIsDragging(true);
-  }, [position]);
-
-  useEffect(() => {
-    if (!isDragging) return;
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      if (!dragRef.current) return;
-      const cx = "touches" in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
-      const cy = "touches" in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
-      const nx = Math.min(-16, Math.max(-(window.innerWidth - 100), dragRef.current.px + cx - dragRef.current.x));
-      const ny = Math.max(0, Math.min(window.innerHeight - 100, dragRef.current.py + cy - dragRef.current.y));
-      setPosition({ x: nx, y: ny });
-    };
-    const onUp = () => { setIsDragging(false); saveJson(POSITION_KEY, position); dragRef.current = null; };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    window.addEventListener("touchmove", onMove, { passive: false });
-    window.addEventListener("touchend", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
-  }, [isDragging, position]);
-
-  const handleResizeStart = useCallback((corner: string) => (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const cx = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const cy = "touches" in e ? e.touches[0].clientY : e.clientY;
-    resizeRef.current = { x: cx, y: cy, w: panelSize.width, h: panelSize.height, px: position.x, py: position.y, corner };
-    setIsResizing(true);
-  }, [panelSize, position]);
-
-  useEffect(() => {
-    if (!isResizing) return;
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      if (!resizeRef.current) return;
-      const cx = "touches" in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
-      const cy = "touches" in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
-      const ref = resizeRef.current;
-      const dx = cx - ref.x;
-      const dy = cy - ref.y;
-
-      let nw = ref.w;
-      let nh = ref.h;
-      let nx = ref.px;
-      let ny = ref.py;
-
-      if (ref.corner === "se") {
-        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w + dx));
-        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h + dy));
-        nx = ref.px + dx;
-      } else if (ref.corner === "sw") {
-        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w - dx));
-        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h + dy));
-      } else if (ref.corner === "ne") {
-        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w + dx));
-        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h - dy));
-        nx = ref.px + dx;
-        ny = ref.py + dy;
-      } else if (ref.corner === "nw") {
-        nw = Math.max(MIN_PANEL_SIZE.width, Math.min(window.innerWidth - 50, ref.w - dx));
-        nh = Math.max(MIN_PANEL_SIZE.height, Math.min(window.innerHeight - 100, ref.h - dy));
-        ny = ref.py + dy;
-      }
-
-      setPanelSize({ width: nw, height: nh });
-      setPosition({ x: nx, y: ny });
-    };
-    const onUp = () => { setIsResizing(false); saveJson(PANEL_SIZE_KEY, panelSize); saveJson(POSITION_KEY, position); resizeRef.current = null; };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    window.addEventListener("touchmove", onMove, { passive: false });
-    window.addEventListener("touchend", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp); };
-  }, [isResizing, panelSize, position]);
 
   const buildChatHandlers = useCallback((aid: string) => {
     activeAssistantIdRef.current = aid;
@@ -356,16 +491,41 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [t]);
 
+  const handlePanelResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>, mode: PanelResizeMode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    resizeRef.current = { startX: event.clientX, startY: event.clientY, startRect: panelRect, mode };
+    setIsPanelResizing(true);
+  }, [panelRect]);
+
+  const handlePanelDragStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, textarea, input, a")) return;
+    event.preventDefault();
+    dragRef.current = { startX: event.clientX, startY: event.clientY, startRect: panelRect };
+    setIsPanelDragging(true);
+  }, [panelRect]);
+
+  const handleIconPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    iconDragRef.current = { startX: event.clientX, startY: event.clientY, startPos: iconPos, moved: false };
+    setIsIconDragging(true);
+  }, [iconPos]);
+
   return (
     <>
       {!isOpen && (
         <button
           type="button"
-          className="ai-assistant-float-btn"
-          style={{ right: `${Math.abs(position.x)}px`, top: `${position.y}px`, transform: isDragging ? "scale(1.05)" : undefined }}
-          onClick={() => setIsOpen(true)}
-          onMouseDown={handleDragStart}
-          onTouchStart={handleDragStart}
+          className={`ai-assistant-float-btn${isIconDragging ? " ai-assistant-float-btn--dragging" : ""}`}
+          style={{ left: iconPos.left, top: iconPos.top }}
+          onPointerDown={handleIconPointerDown}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setIsOpen(true);
+            }
+          }}
           title={t("smart_writer_title")}
         >
           <AiAssistantMark />
@@ -375,16 +535,28 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 
       {isOpen && (
         <div
-          className="ai-assistant-panel"
+          className={`ai-assistant-panel${isPanelResizing ? " ai-assistant-panel--resizing" : ""}${isPanelDragging ? " ai-assistant-panel--dragging" : ""}`}
           style={{
-            right: `${Math.abs(position.x)}px`,
-            top: `${position.y}px`,
-            width: `min(${panelSize.width}px, calc(100vw - 24px))`,
-            height: `min(${panelSize.height}px, calc(100vh - 24px))`,
-            maxHeight: "calc(100vh - 88px)",
+            left: panelRect.left,
+            top: panelRect.top,
+            width: panelRect.width,
+            height: panelRect.height,
           }}
         >
-          <div className="ai-assistant-header" onMouseDown={handleDragStart} onTouchStart={handleDragStart} style={{ cursor: "grab" }}>
+          <div
+            className="ai-assistant-panel__width-handle"
+            onPointerDown={(event) => handlePanelResizeStart(event, "left")}
+            aria-hidden="true"
+          />
+          {(["nw", "ne", "sw", "se"] as const).map((mode) => (
+            <div
+              key={mode}
+              className={`ai-assistant-panel__resize ai-assistant-panel__resize--${mode}`}
+              onPointerDown={(event) => handlePanelResizeStart(event, mode)}
+              aria-hidden="true"
+            />
+          ))}
+          <div className="ai-assistant-header" onPointerDown={handlePanelDragStart}>
             <div className="ai-assistant-header__title">
               <AiAssistantMark className="ai-assistant-mark--header" />
               <span>{t("smart_writer_title")}</span>
@@ -486,27 +658,6 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
               </svg>
             </button>
           </div>
-
-          <div
-            className="ai-assistant-panel__resize ai-assistant-panel__resize--nw"
-            onMouseDown={handleResizeStart("nw")}
-            onTouchStart={handleResizeStart("nw")}
-          />
-          <div
-            className="ai-assistant-panel__resize ai-assistant-panel__resize--ne"
-            onMouseDown={handleResizeStart("ne")}
-            onTouchStart={handleResizeStart("ne")}
-          />
-          <div
-            className="ai-assistant-panel__resize ai-assistant-panel__resize--sw"
-            onMouseDown={handleResizeStart("sw")}
-            onTouchStart={handleResizeStart("sw")}
-          />
-          <div
-            className="ai-assistant-panel__resize ai-assistant-panel__resize--se"
-            onMouseDown={handleResizeStart("se")}
-            onTouchStart={handleResizeStart("se")}
-          />
         </div>
       )}
     </>

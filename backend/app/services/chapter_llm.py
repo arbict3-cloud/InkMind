@@ -22,7 +22,7 @@ def messages_selection_ai(
     *,
     chapter_content_full: str,
     selected_text: str,
-    mode: Literal["expand", "polish"],
+    mode: Literal["rewrite", "expand", "polish", "append"],
     language: Language = "zh",
 ) -> tuple[str, str]:
     """选区扩写 / 润色。chapter_content_full 为当前编辑器中的章节全文。"""
@@ -47,22 +47,25 @@ def messages_selection_ai(
     full_ctx = (chapter_content_full or "").strip()[:_SELECTION_CTX_MAX]
     full_ctx_display = full_ctx or get_prompt("common_none", language)
     
-    if mode == "expand":
-        system = get_prompt("selection_expand_system", language)
-        user_msg = (
-            overview +
-            get_prompt("selection_full_context", language, context=full_ctx_display) +
-            get_prompt("selection_selected", language, selected=sel) +
-            get_prompt("selection_expand_closing", language)
-        )
-    else:
-        system = get_prompt("selection_polish_system", language)
-        user_msg = (
-            overview +
-            get_prompt("selection_full_context", language, context=full_ctx_display) +
-            get_prompt("selection_selected", language, selected=sel) +
-            get_prompt("selection_polish_closing", language)
-        )
+    system_key = {
+        "rewrite": "selection_rewrite_system",
+        "expand": "selection_expand_system",
+        "polish": "selection_polish_system",
+        "append": "selection_append_system",
+    }[mode]
+    closing_key = {
+        "rewrite": "selection_rewrite_closing",
+        "expand": "selection_expand_closing",
+        "polish": "selection_polish_closing",
+        "append": "selection_append_closing",
+    }[mode]
+    system = get_prompt(system_key, language)
+    user_msg = (
+        overview +
+        get_prompt("selection_full_context", language, context=full_ctx_display) +
+        get_prompt("selection_selected", language, selected=sel) +
+        get_prompt(closing_key, language)
+    )
     return system, user_msg
 
 
