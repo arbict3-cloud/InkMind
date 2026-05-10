@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ${{ secrets.DOCKER_REGISTRY || 'ghcr.io' }}
-  IMAGE_PREFIX: ${{ secrets.DOCKER_IMAGE_PREFIX || 'inkmind' }}
+  IMAGE_PREFIX: ${{ secrets.DOCKER_IMAGE_PREFIX || format('{0}/inkmind', github.repository_owner) }}
 
 jobs:
   build-and-push:
