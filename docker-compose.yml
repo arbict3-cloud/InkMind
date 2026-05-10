@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-inkmind}-backend:${DOCKER_IMAGE_TAG:-latest}
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-owner/inkmind}-backend:${DOCKER_IMAGE_TAG:-latest}
     build:
       context: ./backend
     container_name: inkmind-backend
@@ -16,7 +16,7 @@ services:
       start_period: 10s
 
   frontend:
-    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-inkmind}-frontend:${DOCKER_IMAGE_TAG:-latest}
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE_PREFIX:-owner/inkmind}-frontend:${DOCKER_IMAGE_TAG:-latest}
     build:
       context: ./frontend
     container_name: inkmind-frontend
