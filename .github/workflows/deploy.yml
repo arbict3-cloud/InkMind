@@ -16,26 +16,23 @@ jobs:
           port: "22"
           username: ${{ secrets.ALIYUN_USER }}
           key: ${{ secrets.ALIYUN_SSH_KEY }}
-          script_stop: true
           command_timeout: 30m
           script: |
-            set -e
-
             DEPLOY_PATH="/opt/inkmind"
             mkdir -p $DEPLOY_PATH
             cd $DEPLOY_PATH
 
-            # 首次部署：克隆代码
+            echo "=== [1/5] 拉取代码 ==="
             if [ ! -d ".git" ]; then
-              git clone https://github.com/${{ github.repository }}.git .
+              rm -rf ${DEPLOY_PATH:?}/*
+              git clone https://github.com/${{ github.repository }}.git . || { echo "ERROR: git clone failed"; exit 1; }
             fi
+            git fetch origin main || { echo "ERROR: git fetch failed"; exit 1; }
+            git reset --hard origin/main || { echo "ERROR: git reset failed"; exit 1; }
+            echo "代码版本: $(git log --oneline -1)"
 
-            # 拉取最新代码
-            git fetch origin main
-            git reset --hard origin/main
-
-            # 写入 .env（从模板 + Secrets 覆盖）
-            cp deploy/env.production.template .env
+            echo "=== [2/5] 写入 .env ==="
+            cp deploy/env.production.template .env || { echo "ERROR: cp env template failed"; exit 1; }
 
             [ -n "${{ secrets.SECRET_KEY }}" ] && sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${{ secrets.SECRET_KEY }}|" .env
             [ -n "${{ secrets.DATABASE_URL }}" ] && sed -i "s|^DATABASE_URL=.*|DATABASE_URL=${{ secrets.DATABASE_URL }}|" .env
@@ -49,17 +46,18 @@ jobs:
             [ -n "${{ secrets.MOONSHOT_API_KEY }}" ] && sed -i "s|^MOONSHOT_API_KEY=.*|MOONSHOT_API_KEY=${{ secrets.MOONSHOT_API_KEY }}|" .env
             [ -n "${{ secrets.AGENT_PERMISSION_MODE }}" ] && sed -i "s|^AGENT_PERMISSION_MODE=.*|AGENT_PERMISSION_MODE=${{ secrets.AGENT_PERMISSION_MODE }}|" .env
             [ -n "${{ secrets.AGENT_MAX_TURNS }}" ] && sed -i "s|^AGENT_MAX_TURNS=.*|AGENT_MAX_TURNS=${{ secrets.AGENT_MAX_TURNS }}|" .env
+            echo ".env 已写入"
 
-            # 构建并启动
-            docker compose build
-            docker compose up -d --remove-orphans
+            echo "=== [3/5] 构建镜像 ==="
+            docker compose build || { echo "ERROR: docker compose build failed"; exit 1; }
+
+            echo "=== [4/5] 启动服务 ==="
+            docker compose up -d --remove-orphans || { echo "ERROR: docker compose up failed"; exit 1; }
             docker image prune -f
 
-            # 健康检查
-            echo -n "等待服务启动"
+            echo "=== [5/5] 健康检查 ==="
             for i in $(seq 1 20); do
               if curl -sf http://127.0.0.1/health >/dev/null 2>&1; then
-                echo " OK"
                 echo "部署成功！"
                 exit 0
               fi
