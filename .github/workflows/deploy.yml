@@ -9,38 +9,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Read config files
-        id: configs
-        run: |
-          {
-            echo 'docker_compose<<EOF'
-            cat docker-compose.yml
-            echo EOF
-          } >> $GITHUB_OUTPUT
-          {
-            echo 'env_template<<EOF'
-            cat deploy/env.production.template
-            echo EOF
-          } >> $GITHUB_OUTPUT
-          {
-            echo 'backend_dockerfile<<EOF'
-            cat backend/Dockerfile
-            echo EOF
-          } >> $GITHUB_OUTPUT
-          {
-            echo 'frontend_dockerfile<<EOF'
-            cat frontend/Dockerfile
-            echo EOF
-          } >> $GITHUB_OUTPUT
-          {
-            echo 'nginx_conf<<EOF'
-            cat frontend/nginx.conf
-            echo EOF
-          } >> $GITHUB_OUTPUT
-
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -54,30 +22,21 @@ jobs:
             set -e
 
             DEPLOY_PATH="/opt/inkmind"
-            mkdir -p $DEPLOY_PATH/{backend,frontend}
+            mkdir -p $DEPLOY_PATH
             cd $DEPLOY_PATH
 
-            # 写入配置文件
-            cat > docker-compose.yml << 'FILEEOF'
-            ${{ steps.configs.outputs.docker_compose }}
-            FILEEOF
-            cat > backend/Dockerfile << 'FILEEOF'
-            ${{ steps.configs.outputs.backend_dockerfile }}
-            FILEEOF
-            cat > frontend/Dockerfile << 'FILEEOF'
-            ${{ steps.configs.outputs.frontend_dockerfile }}
-            FILEEOF
-            cat > frontend/nginx.conf << 'FILEEOF'
-            ${{ steps.configs.outputs.nginx_conf }}
-            FILEEOF
-            cat > env.template << 'FILEEOF'
-            ${{ steps.configs.outputs.env_template }}
-            FILEEOF
+            # 首次部署：克隆代码
+            if [ ! -d ".git" ]; then
+              git clone https://github.com/${{ github.repository }}.git .
+            fi
 
-            # 生成 .env
-            cp env.template .env
+            # 拉取最新代码
+            git fetch origin main
+            git reset --hard origin/main
 
-            # 覆盖敏感配置（从 GitHub Secrets 写入，跳过未设置的）
+            # 写入 .env（从模板 + Secrets 覆盖）
+            cp deploy/env.production.template .env
+
             [ -n "${{ secrets.SECRET_KEY }}" ] && sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${{ secrets.SECRET_KEY }}|" .env
             [ -n "${{ secrets.DATABASE_URL }}" ] && sed -i "s|^DATABASE_URL=.*|DATABASE_URL=${{ secrets.DATABASE_URL }}|" .env
             [ -n "${{ secrets.CORS_ORIGINS }}" ] && sed -i "s|^CORS_ORIGINS=.*|CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}|" .env
@@ -91,11 +50,9 @@ jobs:
             [ -n "${{ secrets.AGENT_PERMISSION_MODE }}" ] && sed -i "s|^AGENT_PERMISSION_MODE=.*|AGENT_PERMISSION_MODE=${{ secrets.AGENT_PERMISSION_MODE }}|" .env
             [ -n "${{ secrets.AGENT_MAX_TURNS }}" ] && sed -i "s|^AGENT_MAX_TURNS=.*|AGENT_MAX_TURNS=${{ secrets.AGENT_MAX_TURNS }}|" .env
 
-            # 本地构建并启动（避免从 ghcr.io 拉镜像的超时问题）
-            docker compose build --no-cache
+            # 构建并启动
+            docker compose build
             docker compose up -d --remove-orphans
-
-            # 清理旧镜像
             docker image prune -f
 
             # 健康检查
