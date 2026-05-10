@@ -9,6 +9,7 @@
 set -e
 
 DEPLOY_PATH="${DEPLOY_PATH:-/opt/inkmind}"
+PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 
 echo "=========================================="
 echo "  InkMind 服务器初始化（Docker 方案）"
