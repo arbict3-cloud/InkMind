@@ -24,13 +24,37 @@ yum update -y
 yum install -y git curl wget yum-utils
 
 # ------------------------------------------
-# 2. 安装 Docker
+# 2. 安装 Docker（使用阿里云镜像源）
 # ------------------------------------------
 echo "[2/5] 安装 Docker..."
 
 if ! command -v docker &>/dev/null; then
-  yum install -y yum-utils
-  yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+  rm -f /etc/yum.repos.d/docker-ce*.repo
+
+  cat > /etc/yum.repos.d/docker-ce.repo << 'REPOEOF'
+[docker-ce-stable]
+name=Docker CE Stable - $basearch
+baseurl=https://mirrors.aliyun.com/docker-ce/linux/centos/$releasever/$basearch/stable
+enabled=1
+gpgcheck=1
+gpgkey=https://mirrors.aliyun.com/docker-ce/linux/centos/gpg
+
+[docker-ce-stable-debuginfo]
+name=Docker CE Stable - Debuginfo $basearch
+baseurl=https://mirrors.aliyun.com/docker-ce/linux/centos/$releasever/debug-$basearch/stable
+enabled=0
+gpgcheck=1
+gpgkey=https://mirrors.aliyun.com/docker-ce/linux/centos/gpg
+
+[docker-ce-stable-source]
+name=Docker CE Stable - Sources
+baseurl=https://mirrors.aliyun.com/docker-ce/linux/centos/$releasever/source/stable
+enabled=0
+gpgcheck=1
+gpgkey=https://mirrors.aliyun.com/docker-ce/linux/centos/gpg
+REPOEOF
+
+  yum makecache fast 2>/dev/null || yum makecache
   yum install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
   systemctl enable docker
   systemctl start docker
@@ -44,9 +68,8 @@ docker compose version
 # ------------------------------------------
 echo "[3/5] 配置 Docker 镜像加速..."
 
-if [ ! -f /etc/docker/daemon.json ]; then
-  mkdir -p /etc/docker
-  cat > /etc/docker/daemon.json << 'EOF'
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json << 'EOF'
 {
   "registry-mirrors": [
     "https://mirror.ccs.tencentyun.com",
@@ -59,12 +82,11 @@ if [ ! -f /etc/docker/daemon.json ]; then
   }
 }
 EOF
-  systemctl daemon-reload
-  systemctl restart docker
-fi
+systemctl daemon-reload
+systemctl restart docker
 
 # ------------------------------------------
-# 4. 克隆项目代码
+# 4. 准备部署目录
 # ------------------------------------------
 echo "[4/5] 准备部署目录..."
 
