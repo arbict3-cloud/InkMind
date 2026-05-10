@@ -66,14 +66,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Copy config files to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.ALIYUN_HOST }}
-          username: ${{ secrets.ALIYUN_USER }}
-          key: ${{ secrets.ALIYUN_SSH_KEY }}
-          source: "docker-compose.yml,deploy/env.production.template"
-          target: "/opt/inkmind"
+      - name: Read config files
+        id: configs
+        run: |
+          DOCKER_COMPOSE=$(cat docker-compose.yml | base64 -w0)
+          ENV_TEMPLATE=$(cat deploy/env.production.template | base64 -w0)
+          echo "docker_compose=$DOCKER_COMPOSE" >> $GITHUB_OUTPUT
+          echo "env_template=$ENV_TEMPLATE" >> $GITHUB_OUTPUT
 
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
@@ -90,10 +89,15 @@ jobs:
             IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}"
             REGISTRY="${{ env.REGISTRY }}"
             IMAGE_PREFIX="${{ env.IMAGE_PREFIX }}"
+            mkdir -p $DEPLOY_PATH
             cd $DEPLOY_PATH
 
-            # 以模板为基础生成 .env（保留所有变量和默认值）
-            cp deploy/env.production.template .env
+            # 写入 docker-compose.yml（从 CI 仓库解码）
+            echo "${{ steps.configs.outputs.docker_compose }}" | base64 -d > docker-compose.yml
+
+            # 写入 env 模板并以此为 .env 基础
+            echo "${{ steps.configs.outputs.env_template }}" | base64 -d > env.template
+            cp env.template .env
 
             # 覆盖 Docker Compose 镜像变量
             sed -i "s|^DOCKER_REGISTRY=.*|DOCKER_REGISTRY=$REGISTRY|" .env
