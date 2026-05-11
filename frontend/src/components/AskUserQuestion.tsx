@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { PendingQuestionData, QuestionOption, RawQuestionOption } from "@/types/sse";
+import type { PendingQuestionData, QuestionItem, QuestionOption, RawQuestionOption } from "@/types/sse";
 import { useI18n } from "@/i18n";
 
 export interface AskUserQuestionProps {
@@ -12,9 +12,21 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
   const { t } = useI18n();
   const [customInput, setCustomInput] = useState("");
   const [selectedOption, setSelectedOption] = useState<QuestionOption | null>(null);
+  const [currentStep, setCurrentStep] = useState(0);
+
+  const steps = useMemo<QuestionItem[]>(() => {
+    if (question.questions && question.questions.length > 0) {
+      return question.questions;
+    }
+    return [{ question: question.question || "", options: question.options || [] }];
+  }, [question]);
+
+  const currentQ = steps[currentStep] || steps[0];
+  const isLastStep = currentStep >= steps.length - 1;
+  const isMultiStep = steps.length > 1;
 
   const normalizedOptions = useMemo<QuestionOption[]>(() => {
-    const rawOptions = Array.isArray(question.options) ? question.options : [];
+    const rawOptions = Array.isArray(currentQ.options) ? currentQ.options : [];
     return rawOptions
       .map((opt: RawQuestionOption) => {
         if (typeof opt === "string") {
@@ -25,7 +37,7 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
         return label ? { label, description: opt.description } : null;
       })
       .filter((opt): opt is QuestionOption => Boolean(opt));
-  }, [question.options]);
+  }, [currentQ.options]);
 
   const fallbackOptions = useMemo<QuestionOption[]>(() => {
     if (normalizedOptions.length > 0) return [];
@@ -51,7 +63,9 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
     const cleanLabel = opt.label
       .replace(/\s*[\(（]\s*recommended\s*[\)）]\s*$/i, "")
       .trim();
-    onAnswer(question.question_id, cleanLabel, cleanLabel);
+    if (isLastStep) {
+      onAnswer(question.question_id, cleanLabel, cleanLabel);
+    }
   };
 
   const handleCustomSubmit = () => {
@@ -60,12 +74,37 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
     }
   };
 
+  const handleNextStep = () => {
+    if (!selectedOption && !customInput.trim()) return;
+    const answer = selectedOption?.label || customInput.trim();
+    if (currentStep < steps.length - 1) {
+      setSelectedOption(null);
+      setCustomInput("");
+      setCurrentStep(currentStep + 1);
+    } else {
+      onAnswer(question.question_id, answer, selectedOption?.label);
+    }
+  };
+
   return (
     <div className="ai-assistant-question">
+      {isMultiStep && (
+        <div className="ai-assistant-question__steps">
+          {steps.map((_, idx) => (
+            <div
+              key={idx}
+              className={`ai-assistant-question__step-dot${
+                idx === currentStep ? " ai-assistant-question__step-dot--active" : ""
+              }${idx < currentStep ? " ai-assistant-question__step-dot--done" : ""}`}
+            />
+          ))}
+        </div>
+      )}
+
       {question.header && (
         <div className="ai-assistant-question__header">{question.header}</div>
       )}
-      <div className="ai-assistant-question__text">{question.question}</div>
+      <div className="ai-assistant-question__text">{currentQ.question || question.question}</div>
 
       {hasOptions && (
         <div className="ai-assistant-question__options">
@@ -100,17 +139,48 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
             onKeyDown={(e) => {
               if (e.key === "Enter" && customInput.trim()) {
                 e.preventDefault();
-                handleCustomSubmit();
+                if (isLastStep) {
+                  handleCustomSubmit();
+                } else {
+                  handleNextStep();
+                }
               }
             }}
           />
           <button
             type="button"
             className="ai-assistant-question__submit"
-            onClick={handleCustomSubmit}
+            onClick={isLastStep ? handleCustomSubmit : handleNextStep}
             disabled={disabled || !customInput.trim()}
           >
-            {t("ai_question_submit")}
+            {isLastStep ? t("ai_question_submit") : t("ai_question_next")}
+          </button>
+        </div>
+      )}
+
+      {isMultiStep && !showCustomInput && (
+        <div className="ai-assistant-question__nav">
+          {currentStep > 0 && (
+            <button
+              type="button"
+              className="ai-assistant-question__nav-btn ai-assistant-question__nav-btn--prev"
+              onClick={() => {
+                setCurrentStep(currentStep - 1);
+                setSelectedOption(null);
+                setCustomInput("");
+              }}
+              disabled={disabled}
+            >
+              {t("ai_question_prev")}
+            </button>
+          )}
+          <button
+            type="button"
+            className="ai-assistant-question__nav-btn ai-assistant-question__nav-btn--next"
+            onClick={handleNextStep}
+            disabled={disabled || (!selectedOption && !customInput.trim())}
+          >
+            {isLastStep ? t("ai_question_submit") : t("ai_question_next")}
           </button>
         </div>
       )}

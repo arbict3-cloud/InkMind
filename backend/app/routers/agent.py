@@ -159,23 +159,12 @@ async def answer_question(
             detail=f"会话不存在: {body.session_id}",
         )
 
-    from app.agent.claude_orchestrator import _resolve_user_input
-    answer_text = body.selected_option or body.answer
-
-    answers: dict[str, str] = {}
-    if session and session.pending_question and session.pending_question.get("questions"):
-        for q in session.pending_question["questions"]:
-            q_text = q.get("question", "") if isinstance(q, dict) else ""
-            answers[q_text] = answer_text
-    else:
-        answers[""] = answer_text
-
-    resolved = _resolve_user_input(body.question_id, answers)
-
-    if not resolved:
-        session.pending_question = None
-
-    return {"status": "ok", "resolved": resolved}
+    return await orchestrator.answer_question(
+        session,
+        body.question_id,
+        body.answer,
+        body.selected_option,
+    )
 
 
 @router.get("/sessions/{session_id}")
@@ -212,7 +201,8 @@ async def close_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"会话不存在: {session_id}",
         )
-    _active_sessions.pop(session_id, None)
+    orchestrator = ClaudeOrchestrator(SessionLocal, None, None)
+    await orchestrator.close_session(session)
     return {"success": True, "session_id": session_id}
 
 
