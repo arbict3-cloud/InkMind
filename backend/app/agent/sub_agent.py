@@ -23,7 +23,7 @@ from app.agent.memory import NovelMemory
 from app.agent.task_queue import AgentTask, AgentTaskQueue, get_task_queue
 from app.config import settings
 from app.language import Language
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, calc_max_tokens_from_word_count
 from app.llm.providers import get_llm, resolve_llm_for_user
 from app.llm.ndjson_stream import filter_think_chunks
 from app.models import Chapter, Character, Novel, User
@@ -200,7 +200,9 @@ class SubAgentExecutor:
             get_prompt("gen_user_warning", self._language)
         )
 
-        raw = "".join(filter_think_chunks(llm.stream_complete(system, user))).strip()
+        raw = "".join(filter_think_chunks(
+            llm.stream_complete(system, user, max_tokens=calc_max_tokens_from_word_count(word_count, language=self._language))
+        )).strip()
         text = _strip_code_fence(raw)
 
         title_out = ""
@@ -284,14 +286,14 @@ class SubAgentExecutor:
                 "必须显著扩充正文，不要只替换场景或缩写原文；请保留原有主线，增加环境、动作、心理、对话和冲突推进细节。"
             )
 
-        revised = revise_chapter_body(llm, self._novel, chapter, final_instruction, language=self._language)
+        revised = revise_chapter_body(llm, self._novel, chapter, final_instruction, language=self._language, target_word_count=target_word_count)
         if target_word_count and len(revised) < max(int(target_word_count * 0.85), int(current_length * 1.25)):
             retry_instruction = (
                 f"{final_instruction}\n\n"
                 f"上一次输出只有约 {len(revised)} 字，仍然偏短。请重新扩写，目标至少 {target_word_count} 字；"
                 "不要改成另一个无关场景，不要删减原有剧情信息。"
             )
-            revised = revise_chapter_body(llm, self._novel, chapter, retry_instruction, language=self._language)
+            revised = revise_chapter_body(llm, self._novel, chapter, retry_instruction, language=self._language, target_word_count=target_word_count)
 
         return {
             "revised_content": revised,

@@ -3,7 +3,7 @@ from typing import Literal
 
 from sqlalchemy.orm import Session
 
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, calc_max_tokens_from_word_count
 from app.models import Chapter, Novel
 from app.language import Language
 from app.prompts import get_prompt
@@ -111,9 +111,11 @@ def revise_chapter_body(
     instruction: str,
     *,
     language: Language = "zh",
+    target_word_count: int | None = None,
 ) -> str:
     s, u = messages_revise_chapter_body(novel, chapter, instruction, language=language)
-    return llm.complete(s, u).strip()
+    max_tokens = calc_max_tokens_from_word_count(target_word_count, language=language)
+    return llm.complete(s, u, max_tokens=max_tokens).strip()
 
 
 def messages_append_chapter_body(
