@@ -26,7 +26,7 @@ from app.agent.tools import (
     GetNovelContextTool,
     GetPreviousChaptersTool,
 )
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, calc_max_tokens_from_word_count
 from app.language import Language
 from app.models import Character, Chapter, Novel, User
 from app.prompts import get_prompt
@@ -463,7 +463,7 @@ class ChapterContentSubagent(Subagent):
                 + get_prompt("gen_user_warning", self._language)
             )
 
-            llm_response = self._llm.complete(system, user)
+            llm_response = self._llm.complete(system, user, max_tokens=calc_max_tokens_from_word_count(word_count, language=self._language))
 
             content_result = self._parse_content_response(llm_response, fixed_title)
 
@@ -521,7 +521,7 @@ class ChapterContentSubagent(Subagent):
             )
 
             full_response = ""
-            for chunk in self._llm.stream_complete(system, user):
+            for chunk in self._llm.stream_complete(system, user, max_tokens=calc_max_tokens_from_word_count(word_count, language=self._language)):
                 full_response += chunk
                 yield chunk
 

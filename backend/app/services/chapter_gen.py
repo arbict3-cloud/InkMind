@@ -15,7 +15,7 @@ from app.agent.tools import (
     GetPreviousChaptersTool,
 )
 from app.agent.ask_user import AskUserTool
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, calc_max_tokens_from_word_count
 from app.llm.ndjson_stream import filter_think_chunks
 from app.models import Chapter, Novel
 from app.services.chapter_llm import (
@@ -597,8 +597,10 @@ def run_direct_chapter_generation(
         fixed_title=fixed_title, word_count=word_count, language=language
     )
 
+    max_tokens = calc_max_tokens_from_word_count(word_count, language=language)
+
     body_chunks: list[str] = []
-    for chunk in filter_think_chunks(llm.stream_complete(system, user)):
+    for chunk in filter_think_chunks(llm.stream_complete(system, user, max_tokens=max_tokens)):
         body_chunks.append(chunk)
         yield chunk
 

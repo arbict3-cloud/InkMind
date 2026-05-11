@@ -32,7 +32,7 @@ class OpenAICompatibleLLM(LLMProvider):
             return None
         return 0.85
 
-    def stream_complete(self, system: str, user: str) -> Iterator[str]:
+    def stream_complete(self, system: str, user: str, *, max_tokens: int | None = None) -> Iterator[str]:
         payload: dict = {
             "model": self._model,
             "messages": [
@@ -44,6 +44,11 @@ class OpenAICompatibleLLM(LLMProvider):
         t = self._chat_temperature()
         if t is not None:
             payload["temperature"] = t
+        if max_tokens is not None:
+            if self._model.lower().startswith(("o1", "o3", "o4")):
+                payload["max_completion_tokens"] = max_tokens
+            else:
+                payload["max_tokens"] = max_tokens
         try:
             stream = self._client.chat.completions.create(**payload)
         except (APIError, APIConnectionError, APITimeoutError, RateLimitError) as e:

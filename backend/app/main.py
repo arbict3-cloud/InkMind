@@ -67,7 +67,18 @@ def _migrate_sqlite() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine, checkfirst=True)
+    import os
+    if settings.database_url.startswith("sqlite:///./"):
+        db_path = settings.database_url.replace("sqlite:///", "")
+        db_dir = os.path.dirname(os.path.abspath(db_path))
+        os.makedirs(db_dir, exist_ok=True)
+    try:
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+    except Exception as e:
+        if "already exists" in str(e):
+            pass
+        else:
+            raise
     _migrate_sqlite()
     from app.agent.task_queue import get_task_queue
     queue = get_task_queue()

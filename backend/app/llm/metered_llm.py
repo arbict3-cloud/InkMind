@@ -316,8 +316,8 @@ class MeteredLLM(LLMProvider):
         self._action = action
         self._accumulator = accumulator
 
-    def complete(self, system: str, user: str) -> str:
-        output_text = "".join(self._inner.stream_complete(system, user)).strip()
+    def complete(self, system: str, user: str, *, max_tokens: int | None = None) -> str:
+        output_text = "".join(self._inner.stream_complete(system, user, max_tokens=max_tokens)).strip()
         try:
             _record_usage(
                 self._db,
@@ -333,10 +333,10 @@ class MeteredLLM(LLMProvider):
             log.exception("record llm usage failed user_id=%s action=%s", self._user_id, self._action)
         return output_text
 
-    def stream_complete(self, system: str, user: str) -> Iterator[str]:
+    def stream_complete(self, system: str, user: str, *, max_tokens: int | None = None) -> Iterator[str]:
         def gen() -> Iterator[str]:
             out_parts: list[str] = []
-            for chunk in self._inner.stream_complete(system, user):
+            for chunk in self._inner.stream_complete(system, user, max_tokens=max_tokens):
                 out_parts.append(chunk)
                 yield chunk
             try:

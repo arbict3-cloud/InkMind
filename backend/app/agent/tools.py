@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.agent.base import BaseTool
 from app.agent.memory import NovelMemory
+from app.llm.base import calc_max_tokens_from_word_count
 from app.models import Character, Chapter, Novel
 from app.prompts import get_prompt
 from app.language import Language
@@ -171,7 +172,8 @@ class GenerateChapterTool(BaseTool):
             get_prompt("gen_user_warning", self._language)
         )
 
-        return self._llm.complete(system, user)
+        max_tokens = calc_max_tokens_from_word_count(self._word_count, language=self._language)
+        return self._llm.complete(system, user, max_tokens=max_tokens)
 
     def run_stream(self, chapter_summary: str = "", fixed_title: str | None = None) -> Iterator[str]:
         """执行章节生成，流式返回正文内容（纯文本，非 JSON）。"""
@@ -196,7 +198,8 @@ class GenerateChapterTool(BaseTool):
             get_prompt("gen_user_warning", self._language)
         )
 
-        return self._llm.stream_complete(system, user)
+        max_tokens = calc_max_tokens_from_word_count(self._word_count, language=self._language)
+        return self._llm.stream_complete(system, user, max_tokens=max_tokens)
 
 
 def build_generation_prompt(

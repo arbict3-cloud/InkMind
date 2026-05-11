@@ -11,11 +11,12 @@ class AnthropicLLM(LLMProvider):
         self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         self._model = settings.anthropic_model
 
-    def stream_complete(self, system: str, user: str) -> Iterator[str]:
+    def stream_complete(self, system: str, user: str, *, max_tokens: int | None = None) -> Iterator[str]:
+        effective_max = max_tokens or 8192
         try:
             with self._client.messages.stream(
                 model=self._model,
-                max_tokens=8192,
+                max_tokens=effective_max,
                 system=system,
                 messages=[{"role": "user", "content": user}],
             ) as stream:
