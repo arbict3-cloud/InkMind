@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useI18n } from "@/i18n";
 import type { SelectionAiMode } from "./types";
 
@@ -10,7 +11,7 @@ interface SelectionFloatMenuProps {
   onAddToMemo: () => void;
 }
 
-export default function SelectionFloatMenu({
+function SelectionFloatMenu({
   top,
   left,
   busy,
@@ -48,3 +49,5 @@ export default function SelectionFloatMenu({
     </div>
   );
 }
+
+export default memo(SelectionFloatMenu);

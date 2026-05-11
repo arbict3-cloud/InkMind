@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useI18n } from "@/i18n";
 import type { Chapter } from "@/types";
 
@@ -10,7 +11,7 @@ interface ChapterSidebarProps {
   onDeleteChapter: (id: number) => void;
 }
 
-export default function ChapterSidebar({
+function ChapterSidebar({
   chapters,
   activeId,
   sidebarOpen,
@@ -25,13 +26,13 @@ export default function ChapterSidebar({
       <div className="write-left-inner card">
         <div className="write-left-head">
           <strong>{t("write_chapters")}</strong>
-          <button type="button" className="btn btn-ghost" style={{ fontSize: "0.85rem" }} onClick={(e) => { e.stopPropagation(); void onAddChapter(); }}>
+          <button type="button" className="btn btn-ghost write-chapter-add-btn" onClick={(e) => { e.stopPropagation(); void onAddChapter(); }}>
             {t("write_new_chapter")}
           </button>
         </div>
         <div className="chapter-list stack-sm">
           {chapters.length === 0 ? (
-            <p className="muted" style={{ margin: 0, fontSize: "0.88rem" }}>
+            <p className="muted write-chapter-empty-hint">
               {t("write_no_chapters")}
             </p>
           ) : (
@@ -67,3 +68,5 @@ export default function ChapterSidebar({
     </aside>
   );
 }
+
+export default memo(ChapterSidebar);

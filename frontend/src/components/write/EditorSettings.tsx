@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/i18n";
 import type { LineHeightId, LineWidthId, WriteBodyFontSizeId } from "./types";
 
@@ -127,7 +127,7 @@ interface EditorSettingsProps {
   onDrawerClose?: () => void;
 }
 
-export default function EditorSettings({ settings, sidebarToolsRef, sidebarOpen, onToggleSidebar, onDrawerClose }: EditorSettingsProps) {
+export default memo(function EditorSettings({ settings, sidebarToolsRef, sidebarOpen, onToggleSidebar, onDrawerClose }: EditorSettingsProps) {
   const { t } = useI18n();
   const { bodyFontSizeId, setBodyFontSizeId, lineHeightId, setLineHeightId, lineWidthId, setLineWidthId, focusMode, setFocusMode } = settings;
 
@@ -338,4 +338,16 @@ export default function EditorSettings({ settings, sidebarToolsRef, sidebarOpen,
       </div>
     </div>
   );
-}
+}, function areEqual(prev: EditorSettingsProps, next: EditorSettingsProps) {
+  if (prev.sidebarOpen !== next.sidebarOpen) return false;
+  if (prev.sidebarToolsRef !== next.sidebarToolsRef) return false;
+  if (prev.onToggleSidebar !== next.onToggleSidebar) return false;
+  if (prev.onDrawerClose !== next.onDrawerClose) return false;
+  const ps = prev.settings;
+  const ns = next.settings;
+  return ps.bodyFontSizeId === ns.bodyFontSizeId
+    && ps.lineHeightId === ns.lineHeightId
+    && ps.lineWidthId === ns.lineWidthId
+    && ps.focusMode === ns.focusMode
+    && ps.bodyFontSizePx === ns.bodyFontSizePx;
+});
