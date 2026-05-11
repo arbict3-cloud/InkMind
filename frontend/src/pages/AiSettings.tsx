@@ -13,8 +13,6 @@ import {
   Col,
   Select,
   Switch,
-  Dropdown,
-  Avatar,
 } from "antd";
 import {
   SaveOutlined,
@@ -25,36 +23,28 @@ import {
   SafetyOutlined,
   EyeOutlined,
   GoldOutlined,
-  SunOutlined,
-  MoonOutlined,
-  UserOutlined,
-  BarChartOutlined,
-  HistoryOutlined,
-  LogoutOutlined,
   GlobalOutlined,
 } from "@ant-design/icons";
-import { useNavigate } from "react-router-dom";
+import AppHeader, { useHeaderTheme } from "@/components/AppHeader";
 import { useAuth } from "@/context/AuthContext";
-import { useTheme } from "@/context/ThemeContext";
 import { useNavigation } from "@/context/NavigationContext";
 import { useI18n } from "@/i18n";
 
-const { Header, Content } = Layout;
+const { Content } = Layout;
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
 
 type AgentMode = "flexible" | "react" | "direct";
 
 export default function AiSettings() {
-  const { user, updateAiSettings, logout } = useAuth();
-  const { theme, setTheme, isDark } = useTheme();
-  const { t, setLanguage, isZh } = useI18n();
-  const nav = useNavigate();
+  const { user, updateAiSettings } = useAuth();
+  const { t } = useI18n();
+  const colors = useHeaderTheme();
+  const { goBackSmart } = useNavigation();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
-  const { goBackSmart } = useNavigation();
 
   const getAgentModeLabel = (mode: AgentMode): string => {
     const map: Record<AgentMode, string> = {
@@ -119,81 +109,18 @@ export default function AiSettings() {
     }
   };
 
-  const bgColor = isDark ? "#181715" : "#f5f0e8";
-  const bgLinear = isDark
-    ? "linear-gradient(180deg, #1e1d1b 0%, #181715 35%)"
-    : "linear-gradient(180deg, #e6dfd8 0%, #f5f0e8 35%)";
-  const bgRadial = isDark
-    ? "none"
-    : "radial-gradient(ellipse 120% 80% at 50% -20%, #faf9f5 0%, transparent 55%)";
-  const headerBg = isDark ? "#1e1d1b" : "#faf9f5";
-  const headerBorder = isDark ? "#2a2926" : "#e6dfd8";
-  const textColor = isDark ? "#e7e5e1" : "#141413";
-  const cardBg = isDark ? "#1e1d1b" : "#faf9f5";
-  const secondaryTextColor = isDark ? "#a3a19b" : "#6c6a64";
+  const bgColor = colors.bgColor;
+  const bgLinear = colors.bgLinear;
+  const bgRadial = colors.bgRadial;
+  const textColor = colors.textColor;
+  const cardBg = colors.cardBg;
+  const secondaryTextColor = colors.secondaryTextColor;
 
-  const innerCardBg = isDark
+  const innerCardBg = colors.isDark
     ? "linear-gradient(180deg, #1e1d1b 0%, #181715 100%)"
     : "linear-gradient(180deg, #faf9f5 0%, #f5f0e8 100%)";
 
-  const primaryColor = "#cc785c";
-
-  const languageMenuItems = [
-    {
-      key: "zh",
-      icon: <GlobalOutlined />,
-      label: isZh ? "✓ 中文" : "中文",
-      onClick: () => setLanguage("zh"),
-    },
-    {
-      key: "en",
-      icon: <GlobalOutlined />,
-      label: !isZh ? "✓ English" : "English",
-      onClick: () => setLanguage("en"),
-    },
-  ];
-
-  const userMenuItems = [
-    ...(user?.is_admin
-      ? [
-          {
-            key: "admin",
-            icon: <SafetyOutlined />,
-            label: t("nav_admin"),
-            onClick: () => nav("/admin/users"),
-          },
-        ]
-      : []),
-    {
-      key: "settings",
-      icon: <SettingOutlined />,
-      label: t("nav_ai_settings"),
-      disabled: true,
-    },
-    {
-      key: "usage",
-      icon: <BarChartOutlined />,
-      label: t("nav_usage"),
-      onClick: () => nav("/usage"),
-    },
-    {
-      key: "tasks",
-      icon: <HistoryOutlined />,
-      label: t("nav_background_tasks"),
-      onClick: () => nav("/tasks"),
-    },
-    {
-      key: "divider",
-      type: "divider" as const,
-    },
-    {
-      key: "logout",
-      icon: <LogoutOutlined />,
-      label: t("nav_logout"),
-      danger: true,
-      onClick: () => logout(),
-    },
-  ];
+  const primaryColor = colors.primaryColor;
 
   return (
     <Layout
@@ -204,134 +131,28 @@ export default function AiSettings() {
         transition: "background-color 0.3s ease",
       }}
     >
-      <Header
-        style={{
-          padding: "0 2rem",
-          background: headerBg,
-          borderBottom: `1px solid ${headerBorder}`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          height: 72,
-          transition: "background-color 0.3s ease, border-color 0.3s ease",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.75rem",
-          }}
-        >
-          <SettingOutlined
-            style={{
-              fontSize: "1.75rem",
-              color: primaryColor,
-            }}
-          />
-          <Title
-            level={3}
-            style={{
+      <AppHeader
+        leftContent={
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <SettingOutlined style={{ fontSize: "1.75rem", color: primaryColor }} />
+            <Title level={3} style={{
               margin: 0,
               fontFamily: '"Noto Serif SC", "DM Serif Display", Georgia, serif',
               color: textColor,
               fontSize: "1.35rem",
               transition: "color 0.3s ease",
-            }}
-          >
-            {t("ai_settings_title")}
-          </Title>
-        </div>
-
-        <Space size="middle">
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => goBackSmart()}
-            size="large"
-            style={{ height: 40 }}
-          >
+            }}>
+              {t("ai_settings_title")}
+            </Title>
+          </div>
+        }
+        extraActions={
+          <Button icon={<ArrowLeftOutlined />} onClick={() => goBackSmart()} size="large" style={{ height: 40 }}>
             {t("nav_back")}
           </Button>
-
-          <Dropdown menu={{ items: languageMenuItems }} placement="bottomRight">
-            <Button
-              type="text"
-              icon={<GlobalOutlined />}
-              size="large"
-              style={{
-                color: textColor,
-                transition: "color 0.3s ease",
-              }}
-            >
-              {isZh ? "中文" : "EN"}
-            </Button>
-          </Dropdown>
-
-          <Button
-            type="text"
-            icon={theme === "dark" ? <MoonOutlined /> : <SunOutlined />}
-            size="large"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            aria-label={theme === "dark" ? t("theme_light") : t("theme_dark")}
-            style={{
-              color: textColor,
-              transition: "color 0.3s ease",
-            }}
-          />
-
-          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                cursor: "pointer",
-                padding: "0.4rem 0.75rem",
-                borderRadius: 8,
-                transition: "background 0.2s",
-              }}
-            >
-              <Avatar
-                size={36}
-                icon={<UserOutlined />}
-                style={{
-                  background: primaryColor,
-                  transition: "background-color 0.3s ease",
-                }}
-              >
-                {user?.display_name?.charAt(0) || user?.email?.charAt(0)}
-              </Avatar>
-              <div style={{ lineHeight: 1.2 }}>
-                <Text
-                  strong
-                  style={{
-                    display: "block",
-                    color: textColor,
-                    fontSize: "0.9rem",
-                    transition: "color 0.3s ease",
-                  }}
-                >
-                  {user?.display_name || user?.email}
-                </Text>
-                {user?.display_name && (
-                  <Text
-                    type="secondary"
-                    style={{
-                      display: "block",
-                      fontSize: "0.75rem",
-                      color: textColor,
-                      opacity: 0.6,
-                      transition: "color 0.3s ease",
-                    }}
-                  >
-                    {user.email}
-                  </Text>
-                )}
-              </div>
-            </div>
-          </Dropdown>
-        </Space>
-      </Header>
+        }
+        disabledMenuItem="settings"
+      />
 
       <Content
         style={{
@@ -365,7 +186,7 @@ export default function AiSettings() {
           style={{
             borderRadius: 16,
             border: "none",
-            boxShadow: isDark
+            boxShadow: colors.isDark
               ? "0 4px 6px rgba(0, 0, 0, 0.3)"
               : "0 4px 6px rgba(28, 25, 23, 0.06)",
             background: cardBg,

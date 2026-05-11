@@ -21,7 +21,6 @@ export const translations: Record<Language, Record<string, string>> = {
     app_loading: "加载中…",
     
     theme_light: "日间",
-    theme_sepia: "护眼",
     theme_dark: "夜间",
     
     login_title: "欢迎回来",
@@ -1079,7 +1078,6 @@ export const translations: Record<Language, Record<string, string>> = {
     app_loading: "Loading...",
     
     theme_light: "Light",
-    theme_sepia: "Eye Care",
     theme_dark: "Dark",
     
     login_title: "Welcome Back",

@@ -579,6 +579,15 @@ When photography is used (rare — mostly testimonials), avatars crop to perfect
 6. Cream + coral + dark navy is the trinity. Don't introduce a fourth surface tone (no purple cards, no green sections).
 7. When in doubt about emphasis: bigger Copernicus serif before bolder weight.
 
+## Theme Support
+
+InkMind supports **two** theme modes:
+
+1. **Light (日间)** — Cream canvas (`{colors.canvas}` — #faf9f5) as the default floor, warm ink text, coral accents. This is the brand-defining mode.
+2. **Dark (夜间)** — Dark navy surface (`{colors.surface-dark}` — #181715) as the floor, cream-tinted text on dark, inverted component tokens.
+
+> **Note:** The `sepia` (护眼) theme has been **removed**. All sepia-related CSS variables, Ant Design theme config (`inkMindSepiaTheme`), i18n keys (`theme_sepia`), and `ThemeContext` references have been cleaned up. The project now only supports `light` and `dark` modes. Do not reintroduce a third theme without updating `DESIGN.md`, `ThemeContext.tsx`, `theme.ts`, `global.css`, and `translations.ts` together.
+
 ## Known Gaps
 
 - Copernicus and StyreneB are licensed Anthropic typefaces and not available as public web fonts. Substitutes (Tiempos Headline / Cormorant Garamond / EB Garamond for serif; Inter / Söhne for sans) are documented in the typography section.
