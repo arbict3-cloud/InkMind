@@ -291,6 +291,13 @@ async def _pre_tool_use_hook(
 def _build_agent_options(novel_id: int, session_id: str = "") -> ClaudeAgentOptions:
     from claude_agent_sdk.types import HookMatcher
     mcp_server = _build_mcp_server(novel_id, session_id)
+
+    env_overrides: dict[str, str] = {}
+    if settings.anthropic_api_key:
+        env_overrides["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
+    if settings.anthropic_base_url:
+        env_overrides["ANTHROPIC_BASE_URL"] = settings.anthropic_base_url
+
     options_kwargs: dict[str, Any] = {
         "system_prompt": _ORCHESTRATOR_SYSTEM_PROMPT,
         "mcp_servers": {"inkmind": mcp_server},
@@ -301,6 +308,8 @@ def _build_agent_options(novel_id: int, session_id: str = "") -> ClaudeAgentOpti
         "can_use_tool": _can_use_tool,
         "hooks": {"PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])]},
     }
+    if env_overrides:
+        options_kwargs["env"] = env_overrides
     if settings.claude_cli_path:
         options_kwargs["cli_path"] = settings.claude_cli_path
     if settings.anthropic_model:
@@ -399,7 +408,7 @@ class ClaudeOrchestrator:
         provider = _orchestrator_usage_provider()
         db = self._db_session_factory()
         try:
-            accumulator = LLMUsageAccumulator(db, session.user_id, provider, "AI助手编排")
+            accumulator = LLMUsageAccumulator(db, session.user_id, provider, "AI助手")
             accumulator.accumulate(
                 count_tokens(f"{_ORCHESTRATOR_SYSTEM_PROMPT}\n{user_message}", provider),
                 count_tokens(assistant_text, provider),
