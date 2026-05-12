@@ -30,6 +30,19 @@ TaskStatus = Literal["pending", "running", "paused", "completed", "failed", "can
 TaskType = Literal["single_chapter", "batch_chapters", "rewrite_chapter", "append_chapter"]
 
 
+class UserCustomLLM(Base):
+    __tablename__ = "user_custom_llms"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(64))
+    api_key: Mapped[str] = mapped_column(String(512))
+    base_url: Mapped[str | None] = mapped_column(String(512), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    owner: Mapped["User"] = relationship("User", back_populates="custom_llms", foreign_keys=[user_id])
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -38,6 +51,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     preferred_llm_provider: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    preferred_llm_model: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
     llm_call_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -49,12 +63,26 @@ class User(Base):
     auto_audit_min_score: Mapped[int] = mapped_column(Integer, default=60)
     ai_language: Mapped[str | None] = mapped_column(String(8), nullable=True, default=None)
 
+    agent_api_key: Mapped[str | None] = mapped_column(String(512), nullable=True, default=None)
+    agent_base_url: Mapped[str | None] = mapped_column(String(512), nullable=True, default=None)
+    agent_model: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
+    agent_use_custom: Mapped[bool] = mapped_column(Boolean, default=False)
+    agent_custom_llm_id: Mapped[int | None] = mapped_column(ForeignKey("user_custom_llms.id", ondelete="SET NULL"), nullable=True, default=None)
+
+    generation_provider: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    generation_api_key: Mapped[str | None] = mapped_column(String(512), nullable=True, default=None)
+    generation_base_url: Mapped[str | None] = mapped_column(String(512), nullable=True, default=None)
+    generation_model: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
+    generation_use_custom: Mapped[bool] = mapped_column(Boolean, default=False)
+    generation_custom_llm_id: Mapped[int | None] = mapped_column(ForeignKey("user_custom_llms.id", ondelete="SET NULL"), nullable=True, default=None)
+
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     token_quota: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1000000)
     token_quota_used: Mapped[int] = mapped_column(Integer, default=0)
     token_quota_reset_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
 
     novels: Mapped[list["Novel"]] = relationship("Novel", back_populates="owner", cascade="all, delete-orphan")
+    custom_llms: Mapped[list["UserCustomLLM"]] = relationship("UserCustomLLM", back_populates="owner", cascade="all, delete-orphan", foreign_keys="[UserCustomLLM.user_id]")
     llm_usage_events: Mapped[list["LLMUsageEvent"]] = relationship(
         "LLMUsageEvent", back_populates="user", cascade="all, delete-orphan"
     )
@@ -161,6 +189,7 @@ class LLMUsageEvent(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     provider: Mapped[str] = mapped_column(String(64), default="")
+    source: Mapped[str] = mapped_column(String(16), default="builtin")
     action: Mapped[str] = mapped_column(String(128), default="")
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)

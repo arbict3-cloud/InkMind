@@ -3,6 +3,7 @@ export type User = {
   email: string;
   display_name: string | null;
   preferred_llm_provider?: string | null;
+  preferred_llm_model?: string | null;
   /** 累计 LLM 流式调用成功次数（非 token） */
   llm_call_count?: number;
 
@@ -14,10 +15,46 @@ export type User = {
   auto_audit_min_score?: number;
   ai_language?: string | null;
 
+  agent_use_custom?: boolean;
+  agent_custom_llm_id?: number | null;
+  agent_model?: string | null;
+
+  generation_use_custom?: boolean;
+  generation_custom_llm_id?: number | null;
+
   is_admin?: boolean;
   token_quota?: number | null;
   token_quota_used?: number;
   token_quota_reset_at?: string | null;
+};
+
+export type BuiltinProviderInfo = {
+  id: string;
+  label: string;
+  models: string[];
+  default_model: string;
+};
+
+export type CustomLlmInfo = {
+  id: number;
+  provider: string;
+  provider_label: string;
+  api_key: string | null;
+  base_url: string | null;
+  default_base_url: string | null;
+  models: string[];
+};
+
+export type LlmProvidersResponse = {
+  builtin: BuiltinProviderInfo[];
+  default: string;
+  agent_builtin: {
+    model: string;
+    base_url: string | null;
+  } | null;
+  custom_llms: CustomLlmInfo[];
+  generation_custom_llm_id: number | null;
+  agent_custom_llm_id: number | null;
 };
 
 export type Novel = {
@@ -64,6 +101,7 @@ export type Memo = {
 export type LlmUsageItem = {
   id: number;
   provider: string;
+  source: string;
   action: string;
   input_tokens: number;
   output_tokens: number;
@@ -76,6 +114,14 @@ export type LlmUsageSummary = {
   total_input_tokens: number;
   total_output_tokens: number;
   total_tokens: number;
+  builtin_calls: number;
+  builtin_input_tokens: number;
+  builtin_output_tokens: number;
+  builtin_total_tokens: number;
+  custom_calls: number;
+  custom_input_tokens: number;
+  custom_output_tokens: number;
+  custom_total_tokens: number;
   items: LlmUsageItem[];
 };
 
@@ -166,7 +212,6 @@ export type CreateSingleTaskRequest = {
   title?: string | null;
   summary: string;
   fixed_title?: string | null;
-  word_count?: number | null;
   task_type?: "single_chapter" | "rewrite_chapter" | "append_chapter";
 };
 
@@ -175,7 +220,6 @@ export type CreateBatchTaskRequest = {
   after_chapter_id?: number | null;
   total_summary: string;
   chapter_count: number;
-  word_count?: number | null;
 };
 
 export type TokenQuotaStatus = {

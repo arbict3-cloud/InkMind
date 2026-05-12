@@ -4,7 +4,6 @@ from pydantic import BaseModel, field_serializer
 
 
 def _utc_dt(v: datetime) -> datetime:
-    """Ensure datetime is treated as UTC in ISO format."""
     if v.tzinfo is None:
         return v.replace(tzinfo=timezone.utc)
     return v
@@ -13,6 +12,7 @@ def _utc_dt(v: datetime) -> datetime:
 class LLMUsageItemOut(BaseModel):
     id: int
     provider: str
+    source: str = "builtin"
     action: str
     input_tokens: int
     output_tokens: int
@@ -31,4 +31,12 @@ class LLMUsageListOut(BaseModel):
     total_input_tokens: int
     total_output_tokens: int
     total_tokens: int
+    builtin_calls: int = 0
+    builtin_input_tokens: int = 0
+    builtin_output_tokens: int = 0
+    builtin_total_tokens: int = 0
+    custom_calls: int = 0
+    custom_input_tokens: int = 0
+    custom_output_tokens: int = 0
+    custom_total_tokens: int = 0
     items: list[LLMUsageItemOut]

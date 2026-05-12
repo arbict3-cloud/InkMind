@@ -28,7 +28,7 @@ function readStoredTheme(): ThemeId {
 function applyThemeToDocument(theme: ThemeId) {
   const html = document.documentElement;
   
-  html.classList.remove("theme--light", "theme--sepia", "theme--dark");
+  html.classList.remove("theme--light", "theme--dark");
   
   html.classList.add(`theme--${theme}`);
   

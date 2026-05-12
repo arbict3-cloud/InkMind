@@ -95,9 +95,9 @@ class ChapterGenerateIn(BaseModel):
     )
     word_count: int | None = Field(
         default=None,
-        ge=500,
+        ge=1000,
         le=4000,
-        description="期望生成的正文字数（500-4000字），模型会尽量接近但不保证严格符合",
+        description="期望生成的正文字数（1000-4000字），模型会尽量接近但不保证严格符合",
     )
 
 

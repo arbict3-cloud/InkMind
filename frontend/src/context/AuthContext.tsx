@@ -24,6 +24,13 @@ type AuthState = {
     preview_before_save?: boolean | null;
     auto_audit_min_score?: number | null;
     ai_language?: string | null;
+    preferred_llm_provider?: string | null;
+    preferred_llm_model?: string | null;
+    agent_use_custom?: boolean | null;
+    agent_custom_llm_id?: number | null;
+    agent_model?: string | null;
+    generation_use_custom?: boolean | null;
+    generation_custom_llm_id?: number | null;
   }) => Promise<void>;
   refreshUser: () => Promise<void>;
 };
@@ -87,6 +94,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       preview_before_save?: boolean | null;
       auto_audit_min_score?: number | null;
       ai_language?: string | null;
+      preferred_llm_provider?: string | null;
+      preferred_llm_model?: string | null;
+      agent_use_custom?: boolean | null;
+      agent_custom_llm_id?: number | null;
+      agent_model?: string | null;
+      generation_use_custom?: boolean | null;
+      generation_custom_llm_id?: number | null;
     }) => {
       const u = await patchAuthMe(settings);
       setUser(u);

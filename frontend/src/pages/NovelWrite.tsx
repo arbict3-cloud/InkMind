@@ -32,164 +32,10 @@ import { useI18n } from "@/i18n";
 import type { Chapter, ChapterVersion, ChapterVersionDiff } from "@/types";
 import { normalizeBodyParagraphIndent } from "@/utils/bodyParagraphIndent";
 import { getCaretViewportPoint } from "@/utils/textareaCaretViewport";
-
-type AiTool = "generate" | "rewrite" | "append" | "naming" | "evaluate" | "versions";
-type SelectionAiMode = "rewrite" | "expand" | "polish" | "append";
-
-type GenerateTab = "single" | "batch";
-
-type LineHeightId = "compact" | "normal" | "relaxed" | "loose";
-
-const LINE_HEIGHT_IDS: LineHeightId[] = ["compact", "normal", "relaxed", "loose"];
-
-const LINE_HEIGHT_VALUES: Record<LineHeightId, number> = {
-  compact: 1.6,
-  normal: 1.85,
-  relaxed: 2.0,
-  loose: 2.2,
-};
-
-const LINE_HEIGHT_LABEL_KEYS: Record<LineHeightId, string> = {
-  compact: "write_line_height_compact",
-  normal: "write_line_height_normal",
-  relaxed: "write_line_height_relaxed",
-  loose: "write_line_height_loose",
-};
-
-const WRITE_LINE_HEIGHT_KEY = "inkmind_write_line_height";
-
-type LineWidthId = "md" | "lg" | "full";
-
-const LINE_WIDTH_IDS: LineWidthId[] = ["md", "lg", "full"];
-
-const LINE_WIDTH_MAX_WIDTHS: Record<LineWidthId, string | null> = {
-  md: "55ch",
-  lg: "68ch",
-  full: null,
-};
-
-const LINE_WIDTH_LABEL_KEYS: Record<LineWidthId, string> = {
-  md: "write_line_width_md",
-  lg: "write_line_width_lg",
-  full: "write_line_width_full",
-};
-
-const WRITE_LINE_WIDTH_KEY = "inkmind_write_line_width";
-
-const WRITE_FOCUS_MODE_KEY = "inkmind_write_focus_mode";
-
-function readStoredLineHeight(): LineHeightId {
-  try {
-    const v = localStorage.getItem(WRITE_LINE_HEIGHT_KEY);
-    if (v && LINE_HEIGHT_IDS.includes(v as LineHeightId)) {
-      return v as LineHeightId;
-    }
-  } catch {
-    /* ignore */
-  }
-  return "normal";
-}
-
-const LEGACY_LINE_WIDTH_MAP: Record<string, LineWidthId> = {
-  narrow: "md",
-  medium: "md",
-  wide: "lg",
-  full: "full",
-  xs: "md",
-  sm: "md",
-  lg: "lg",
-  xl: "lg",
-  "2xl": "lg",
-};
-
-function readStoredLineWidth(): LineWidthId {
-  try {
-    const v = localStorage.getItem(WRITE_LINE_WIDTH_KEY);
-    if (v) {
-      if (LINE_WIDTH_IDS.includes(v as LineWidthId)) {
-        return v as LineWidthId;
-      }
-      const mapped = LEGACY_LINE_WIDTH_MAP[v];
-      if (mapped) {
-        localStorage.setItem(WRITE_LINE_WIDTH_KEY, mapped);
-        return mapped;
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return "full";
-}
-
-function readStoredFocusMode(): boolean {
-  try {
-    const v = localStorage.getItem(WRITE_FOCUS_MODE_KEY);
-    return v === "true";
-  } catch {
-    return false;
-  }
-}
-
-/** Font size tiers (internal mapping only) */
-type WriteBodyFontSizeId = "xs" | "sm" | "md" | "lg" | "xl" | "xxl";
-
-const WRITE_BODY_FONT_SIZE_IDS: WriteBodyFontSizeId[] = ["xs", "sm", "md", "lg", "xl", "xxl"];
-
-const WRITE_BODY_FONT_SIZE_PX: Record<WriteBodyFontSizeId, number> = {
-  xs: 14,
-  sm: 16,
-  md: 17,
-  lg: 19,
-  xl: 21,
-  xxl: 24,
-};
-
-const WRITE_BODY_FONT_SIZE_LABEL_KEYS: Record<WriteBodyFontSizeId, string> = {
-  xs: "write_font_size_xs",
-  sm: "write_font_size_sm",
-  md: "write_font_size_md",
-  lg: "write_font_size_lg",
-  xl: "write_font_size_xl",
-  xxl: "write_font_size_xxl",
-};
-
-const WRITE_BODY_FONT_SIZE_KEY = "inkmind_write_body_font_size";
-const LEGACY_BODY_FONT_SIZE_PX_KEY = "inkmind_write_body_font_size_px";
-
-function nearestFontSizeId(px: number): WriteBodyFontSizeId {
-  let best = WRITE_BODY_FONT_SIZE_IDS[0];
-  let d = Math.abs(px - WRITE_BODY_FONT_SIZE_PX[best]);
-  for (const id of WRITE_BODY_FONT_SIZE_IDS) {
-    const dd = Math.abs(px - WRITE_BODY_FONT_SIZE_PX[id]);
-    if (dd < d) {
-      d = dd;
-      best = id;
-    }
-  }
-  return best;
-}
-
-function readStoredBodyFontSizeId(): WriteBodyFontSizeId {
-  try {
-    const v = localStorage.getItem(WRITE_BODY_FONT_SIZE_KEY);
-    if (v && WRITE_BODY_FONT_SIZE_IDS.includes(v as WriteBodyFontSizeId)) {
-      return v as WriteBodyFontSizeId;
-    }
-    const legacy = localStorage.getItem(LEGACY_BODY_FONT_SIZE_PX_KEY);
-    if (legacy) {
-      const n = parseInt(legacy, 10);
-      if (Number.isFinite(n)) {
-        const id = nearestFontSizeId(Math.min(24, Math.max(14, n)));
-        localStorage.setItem(WRITE_BODY_FONT_SIZE_KEY, id);
-        localStorage.removeItem(LEGACY_BODY_FONT_SIZE_PX_KEY);
-        return id;
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return "md";
-}
+import EditorSettings, { useEditorSettings } from "@/components/write/EditorSettings";
+import ChapterSidebar from "@/components/write/ChapterSidebar";
+import SelectionFloatMenu from "@/components/write/SelectionFloatMenu";
+import type { AiTool, SelectionAiMode, GenerateTab } from "@/components/write/types";
 
 function parseBatchChapterCountInput(value: string): number | null {
   const trimmed = value.trim();
@@ -206,21 +52,9 @@ export default function NovelWrite() {
   const { user } = useAuth();
   const { theme } = useTheme();
   const { t } = useI18n();
+  const editorSettings = useEditorSettings();
+  const { lineHeightId, lineWidthId, focusMode, setFocusMode, bodyFontSizePx, typewriterMode } = editorSettings;
 
-  const LINE_HEIGHTS = useMemo(
-    () => LINE_HEIGHT_IDS.map((id) => ({ id, label: t(LINE_HEIGHT_LABEL_KEYS[id]), value: LINE_HEIGHT_VALUES[id] })),
-    [t]
-  );
-
-  const LINE_WIDTHS = useMemo(
-    () => LINE_WIDTH_IDS.map((id) => ({ id, label: t(LINE_WIDTH_LABEL_KEYS[id]), maxWidth: LINE_WIDTH_MAX_WIDTHS[id] })),
-    [t]
-  );
-
-  const WRITE_BODY_FONT_SIZES = useMemo(
-    () => WRITE_BODY_FONT_SIZE_IDS.map((id) => ({ id, label: t(WRITE_BODY_FONT_SIZE_LABEL_KEYS[id]), px: WRITE_BODY_FONT_SIZE_PX[id] })),
-    [t]
-  );
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [title, setTitle] = useState("");
@@ -231,21 +65,6 @@ export default function NovelWrite() {
   const [narrow, setNarrow] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth < 900 : false
   );
-  const [bodyFontSizeId, setBodyFontSizeId] = useState<WriteBodyFontSizeId>(() =>
-    typeof window !== "undefined" ? readStoredBodyFontSizeId() : "md"
-  );
-  const [lineHeightId, setLineHeightId] = useState<LineHeightId>(() =>
-    typeof window !== "undefined" ? readStoredLineHeight() : "normal"
-  );
-  const [lineWidthId, setLineWidthId] = useState<LineWidthId>(() =>
-    typeof window !== "undefined" ? readStoredLineWidth() : "full"
-  );
-  const [focusMode, setFocusMode] = useState(() =>
-    typeof window !== "undefined" ? readStoredFocusMode() : false
-  );
-  const [sizeMenuOpen, setSizeMenuOpen] = useState(false);
-  const [lineHeightMenuOpen, setLineHeightMenuOpen] = useState(false);
-  const [lineWidthMenuOpen, setLineWidthMenuOpen] = useState(false);
   const sidebarToolsRef = useRef<HTMLDivElement | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -271,7 +90,6 @@ export default function NovelWrite() {
   const [generateMode, setGenerateMode] = useState<"foreground" | "background">("foreground");
   const [singleGenerateTitle, setSingleGenerateTitle] = useState("");
   const [singleGenerateLockTitle, setSingleGenerateLockTitle] = useState(false);
-  const [generateWordCount, setGenerateWordCount] = useState<number | null>(null);
   const [batchChapterCountInput, setBatchChapterCountInput] = useState("3");
   const [batchSummary, setBatchSummary] = useState("");
   const [batchStreaming, setBatchStreaming] = useState("");
@@ -289,6 +107,10 @@ export default function NovelWrite() {
   const selectionRangeRef = useRef<{ start: number; end: number } | null>(null);
   selectionRangeRef.current = selectionRange;
   const [err, setErr] = useState("");
+
+  type SaveStatus = "saved" | "saving" | "unsaved";
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   const [previewResult, setPreviewResult] = useState<ChapterPreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -309,6 +131,13 @@ export default function NovelWrite() {
   const editorSnapshotRef = useRef({ title: "", summary: "", content: "" });
   editorSnapshotRef.current = { title, summary, content };
   const preGenerateSnapshotRef = useRef({ title: "", summary: "", content: "" });
+  const chaptersRef = useRef<Chapter[]>([]);
+  chaptersRef.current = chapters;
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
+
+  const handleToggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
+  const handleDrawerClose = useCallback(() => setRightTool(null), []);
 
   const loadChapters = useCallback(async () => {
     const list = await fetchChapters(id);
@@ -322,13 +151,6 @@ export default function NovelWrite() {
   const batchChapterCount = parseBatchChapterCountInput(batchChapterCountInput);
   const showSingleInspireCta = !summary.trim();
   const showBatchInspireCta = !batchSummary.trim();
-
-  const bodyFontSizePx = WRITE_BODY_FONT_SIZES.find((x) => x.id === bodyFontSizeId)?.px ?? 17;
-  const bodyFontSizeIndex = (() => {
-    const i = WRITE_BODY_FONT_SIZES.findIndex((x) => x.id === bodyFontSizeId);
-    return i >= 0 ? i : 2;
-  })();
-  const currentBodyFontSize = WRITE_BODY_FONT_SIZES[bodyFontSizeIndex] ?? WRITE_BODY_FONT_SIZES[2];
 
   const wordCount = content.replace(/\s/g, "").length;
   const charCount = content.length;
@@ -344,15 +166,15 @@ export default function NovelWrite() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === ".") {
         e.preventDefault();
-        setFocusMode((prev) => !prev);
+        setFocusMode((v) => !v);
       }
       if (e.key === "Escape" && focusMode) {
-        setFocusMode(false);
+        setFocusMode(() => false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [focusMode]);
+  }, [focusMode, setFocusMode]);
 
   const hasUnsavedChanges = useMemo(() => {
     if (activeId === null) return false;
@@ -374,35 +196,6 @@ export default function NovelWrite() {
   }, [hasUnsavedChanges]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(WRITE_BODY_FONT_SIZE_KEY, bodyFontSizeId);
-    } catch {
-      /* ignore */
-    }
-  }, [bodyFontSizeId]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(WRITE_LINE_HEIGHT_KEY, lineHeightId);
-    } catch {
-      /* ignore */
-    }
-  }, [lineHeightId]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(WRITE_LINE_WIDTH_KEY, lineWidthId);
-    } catch {
-      /* ignore */
-    }
-  }, [lineWidthId]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(WRITE_FOCUS_MODE_KEY, String(focusMode));
-    } catch {
-      /* ignore */
-    }
     if (focusMode) {
       setSidebarOpen(false);
       setRightTool(null);
@@ -410,28 +203,15 @@ export default function NovelWrite() {
   }, [focusMode]);
 
   useEffect(() => {
-    if (!sizeMenuOpen && !lineHeightMenuOpen && !lineWidthMenuOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (sidebarToolsRef.current && !sidebarToolsRef.current.contains(e.target as Node)) {
-        setSizeMenuOpen(false);
-        setLineHeightMenuOpen(false);
-        setLineWidthMenuOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setSizeMenuOpen(false);
-        setLineHeightMenuOpen(false);
-        setLineWidthMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [sizeMenuOpen, lineHeightMenuOpen, lineWidthMenuOpen]);
+    if (typewriterMode !== "on") return;
+    const ta = bodyTextareaRef.current;
+    if (!ta) return;
+    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 24;
+    const visibleHeight = ta.clientHeight;
+    const cursorLine = ta.value.substring(0, ta.selectionEnd).split("\n").length;
+    const targetScroll = cursorLine * lineHeight - visibleHeight / 2;
+    ta.scrollTop = Math.max(0, targetScroll);
+  }, [content, typewriterMode]);
 
   useEffect(() => {
     if (!Number.isFinite(id)) return;
@@ -456,7 +236,7 @@ export default function NovelWrite() {
         const [list, meta] = await Promise.all([fetchChapters(id), fetchLlmProviders()]);
         if (cancelled || novelIdRef.current !== id) return;
         setChapters(list);
-        setLlmOptions(meta.available);
+        setLlmOptions(meta.builtin.map((p) => p.id));
         if (list.length > 0) {
           setActiveId(list[0].id);
         } else {
@@ -813,10 +593,11 @@ export default function NovelWrite() {
     !selectionPanel;
 
   useLayoutEffect(() => {
-    if (!showSelectionBar) {
+    if (!showSelectionBar && !selectionPanel) {
       setSelectionMenuPos(null);
       return;
     }
+    if (!showSelectionBar) return;
     const ta = bodyTextareaRef.current;
     const r = selectionRangeRef.current;
     if (!ta || !r || r.start === r.end) {
@@ -847,7 +628,7 @@ export default function NovelWrite() {
     };
   }, [showSelectionBar, selectionRange, content, bodyFontSizePx]);
 
-  async function flushSave(): Promise<void> {
+  const flushSave = useCallback(async (): Promise<void> => {
     if (debounceTimerRef.current !== null) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
@@ -855,15 +636,22 @@ export default function NovelWrite() {
     const aid = activeIdRef.current;
     if (aid === null) return;
     const { title: t, summary: s, content: c } = editorSnapshotRef.current;
-    const before = chapters.find((x) => x.id === aid);
+    const before = chaptersRef.current.find((x) => x.id === aid);
     if (!before) return;
     if (before.title === t && before.summary === s && before.content === c) return;
-    const ch = await updateChapter(id, aid, { title: t, summary: s, content: c });
-    setChapters((prev) => prev.map((x) => (x.id === ch.id ? ch : x)));
-  }
+    setSaveStatus("saving");
+    try {
+      const ch = await updateChapter(id, aid, { title: t, summary: s, content: c });
+      setChapters((prev) => prev.map((x) => (x.id === ch.id ? ch : x)));
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("unsaved");
+      throw new Error("flush save failed");
+    }
+  }, [id]);
 
-  async function selectChapter(cid: number) {
-    if (cid === activeId) return;
+  const selectChapter = useCallback(async (cid: number) => {
+    if (cid === activeIdRef.current) return;
     setErr("");
     try {
       await flushSave();
@@ -873,8 +661,20 @@ export default function NovelWrite() {
     }
     setActiveId(cid);
     clearVersionState();
-    if (narrow) setSidebarOpen(false);
-  }
+    if (narrowRef.current) setSidebarOpen(false);
+  }, [flushSave]);
+
+  const activeIndex = chapters.findIndex((c) => c.id === activeId);
+  const hasPrevChapter = activeIndex > 0;
+  const hasNextChapter = activeIndex >= 0 && activeIndex < chapters.length - 1;
+
+  const goToPrevChapter = useCallback(() => {
+    if (activeIndex > 0) selectChapter(chapters[activeIndex - 1].id);
+  }, [activeIndex, chapters, selectChapter]);
+
+  const goToNextChapter = useCallback(() => {
+    if (activeIndex >= 0 && activeIndex < chapters.length - 1) selectChapter(chapters[activeIndex + 1].id);
+  }, [activeIndex, chapters, selectChapter]);
 
   useEffect(() => {
     if (rightTool === "versions" && activeId !== null) {
@@ -887,16 +687,21 @@ export default function NovelWrite() {
     if (isPreviewMode) return;
     const snap = chapters.find((c) => c.id === activeId);
     if (!snap) return;
-    if (snap.title === title && snap.summary === summary && snap.content === content) return;
+    if (snap.title === title && snap.summary === summary && snap.content === content) {
+      setSaveStatus("saved");
+      return;
+    }
     if (debounceTimerRef.current !== null) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
+    setSaveStatus("unsaved");
     const scheduledForId = activeId;
     debounceTimerRef.current = window.setTimeout(() => {
       debounceTimerRef.current = null;
       if (activeIdRef.current !== scheduledForId) return;
       void (async () => {
+        setSaveStatus("saving");
         try {
           const ch = await updateChapter(id, scheduledForId, {
             title,
@@ -905,8 +710,10 @@ export default function NovelWrite() {
             skip_version: true,
           } as Parameters<typeof updateChapter>[2]);
           setChapters((prev) => prev.map((c) => (c.id === ch.id ? ch : c)));
+          setSaveStatus("saved");
         } catch (e) {
           setErr(apiErrorMessage(e));
+          setSaveStatus("unsaved");
         }
       })();
     }, 850);
@@ -943,7 +750,7 @@ export default function NovelWrite() {
     }, 0);
   }
 
-  async function onAddChapter() {
+  const onAddChapter = useCallback(async () => {
     const nid = id;
     setErr("");
     try {
@@ -959,15 +766,15 @@ export default function NovelWrite() {
       setChapters(full);
       setActiveId(ch.id);
       lastLoadedChapterIdRef.current = null;
-      if (narrow) setSidebarOpen(false);
+      if (narrowRef.current) setSidebarOpen(false);
     } catch (e) {
       if (novelIdRef.current === nid) {
         setErr(apiErrorMessage(e));
       }
     }
-  }
+  }, [id, flushSave, loadChapters]);
 
-  async function onDeleteChapterById(cid: number) {
+  const onDeleteChapterById = useCallback(async (cid: number) => {
     const nid = id;
     if (!(await confirmAction(t("write_confirm_delete_chapter")))) return;
     setErr("");
@@ -980,7 +787,7 @@ export default function NovelWrite() {
       if (novelIdRef.current !== nid) return;
       setChapters(full);
       lastLoadedChapterIdRef.current = null;
-      if (cid === activeId) {
+      if (cid === activeIdRef.current) {
         if (full.length > 0) {
           setActiveId(full[0].id);
         } else {
@@ -995,7 +802,7 @@ export default function NovelWrite() {
         setErr(apiErrorMessage(e));
       }
     }
-  }
+  }, [id, t, confirmAction, flushSave, loadChapters]);
 
   async function onSummaryInspire() {
     const nid = id;
@@ -1079,7 +886,6 @@ export default function NovelWrite() {
         chapterId: activeId,
         title: singleGenerateTitle.trim() || null,
         lockTitle: singleGenerateLockTitle,
-        wordCount: generateWordCount,
         onToken: (t) => {
           if (novelIdRef.current === nid) setContent((p) => p + t);
         },
@@ -1110,7 +916,6 @@ export default function NovelWrite() {
         setContent(normalizeBodyParagraphIndent(ch.content));
         setSingleGenerateTitle("");
         setSingleGenerateLockTitle(false);
-        setGenerateWordCount(null);
       } else {
         throw new Error(t("write_err_no_result"));
       }
@@ -1151,7 +956,6 @@ export default function NovelWrite() {
       setIsPreviewMode(false);
       setSingleGenerateTitle("");
       setSingleGenerateLockTitle(false);
-      setGenerateWordCount(null);
     } catch (e) {
       setErr(apiErrorMessage(e));
     } finally {
@@ -1197,7 +1001,6 @@ export default function NovelWrite() {
           chapter_count: batchChapterCount,
           total_summary: total,
           after_chapter_id: activeId,
-          word_count: generateWordCount,
         },
         {
           onToken: (t) => {
@@ -1213,7 +1016,6 @@ export default function NovelWrite() {
         setActiveId(created[0].id);
       }
       setGenerateTab("single");
-      setGenerateWordCount(null);
       setBatchStreaming((prev) => prev + `${t("write_batch_complete")} ${created.length} ${t("write_batch_chapters")}`);
     } catch (e) {
       if (novelIdRef.current === nid) {
@@ -1242,7 +1044,6 @@ export default function NovelWrite() {
         title: singleGenerateTitle.trim() || null,
         summary: s,
         fixed_title: singleGenerateLockTitle ? (singleGenerateTitle.trim() || null) : null,
-        word_count: generateWordCount,
         task_type: hasBody ? "rewrite_chapter" : "single_chapter",
       });
       
@@ -1282,7 +1083,6 @@ export default function NovelWrite() {
         after_chapter_id: activeId,
         total_summary: total,
         chapter_count: batchChapterCount,
-        word_count: generateWordCount,
       });
       
       nav("/tasks");
@@ -1470,283 +1270,115 @@ export default function NovelWrite() {
       ) : null}
 
       <div className={`write-workspace${sidebarOpen ? " write-workspace--sidebar-open" : ""}`}>
-        <div className="write-sidenav-toggle">
-          <button
-            type="button"
-            className="write-icon-btn"
-            title={sidebarOpen ? t("write_close_sidebar") : t("write_open_sidebar")}
-            aria-expanded={sidebarOpen}
-            onClick={() => setSidebarOpen((v) => !v)}
-          >
-            <span className="write-icon-hamburger" aria-hidden>
-              <span />
-              <span />
-              <span />
-            </span>
-          </button>
-          <div className="write-sidenav-tools" ref={sidebarToolsRef}>
-            <div className="write-size-picker">
-              <button
-                type="button"
-                className="write-icon-btn write-size-menu-btn"
-                title={t("write_font_size")}
-                aria-expanded={sizeMenuOpen}
-                aria-haspopup="dialog"
-                aria-label={t("write_font_size")}
-                onClick={() => {
-                  setLineHeightMenuOpen(false);
-                  setLineWidthMenuOpen(false);
-                  setSizeMenuOpen((v) => !v);
-                }}
-              >
-                <span className="write-size-icon" aria-hidden>
-                  <span className="write-size-icon-lg">A</span>
-                  <span className="write-size-icon-sm">a</span>
-                  <span className="write-size-icon-rule" />
-                </span>
-              </button>
-              {sizeMenuOpen ? (
-                <div className="write-size-popover" role="dialog" aria-label={t("write_adjust_font_size")}>
-                  <div className="write-size-popover-head">
-                    <span>{t("write_font_size")}</span>
-                    <strong>{currentBodyFontSize.label} · {currentBodyFontSize.px}px</strong>
-                  </div>
-                  <div className="write-size-preview" style={{ fontSize: `${currentBodyFontSize.px}px` }}>
-                    Aa
-                  </div>
-                  <div className="write-size-slider-row">
-                    <span className="write-size-slider-a write-size-slider-a--min" aria-hidden>
-                      A
-                    </span>
-                    <div className="write-size-slider-shell">
-                      <div className="write-size-slider-track-bg" aria-hidden />
-                      <div className="write-size-slider-ticks" aria-hidden>
-                        {WRITE_BODY_FONT_SIZES.map((_, i) => {
-                          const last = WRITE_BODY_FONT_SIZES.length - 1;
-                          if (i === 0 || i === last) return null;
-                          return (
-                            <span
-                              key={i}
-                              className="write-size-slider-tick"
-                              style={{ left: `${(i / last) * 100}%` }}
-                            />
-                          );
-                        })}
-                      </div>
-                      <input
-                        type="range"
-                        className="write-size-range"
-                        min={0}
-                        max={WRITE_BODY_FONT_SIZES.length - 1}
-                        step={1}
-                        value={bodyFontSizeIndex}
-                        aria-valuemin={0}
-                        aria-valuemax={WRITE_BODY_FONT_SIZES.length - 1}
-                        aria-valuenow={bodyFontSizeIndex}
-                        aria-valuetext={
-                          WRITE_BODY_FONT_SIZES.find((x) => x.id === bodyFontSizeId)?.label ?? t("write_font_size_md")
-                        }
-                        onChange={(e) => {
-                          const i = Number(e.target.value);
-                          const row = WRITE_BODY_FONT_SIZES[i];
-                          if (row) setBodyFontSizeId(row.id);
-                        }}
-                      />
-                    </div>
-                    <span className="write-size-slider-a write-size-slider-a--max" aria-hidden>
-                      A
-                    </span>
-                  </div>
-                </div>
-              ) : null}
-            </div>
+        <EditorSettings
+          settings={editorSettings}
+          sidebarToolsRef={sidebarToolsRef}
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={handleToggleSidebar}
+          onDrawerClose={handleDrawerClose}
+        />
 
-            <div className="write-line-height-picker">
-              <button
-                type="button"
-                className="write-icon-btn write-line-height-btn"
-                title={t("write_line_height")}
-                aria-expanded={lineHeightMenuOpen}
-                aria-haspopup="listbox"
-                aria-label={t("write_line_height")}
-                onClick={() => {
-                  setSizeMenuOpen(false);
-                  setLineWidthMenuOpen(false);
-                  setLineHeightMenuOpen((v) => !v);
-                }}
-              >
-                <span className="write-line-height-icon" aria-hidden>
-                  <span className="write-line-height-line" />
-                  <span className="write-line-height-line" />
-                  <span className="write-line-height-line" />
-                </span>
-              </button>
-              {lineHeightMenuOpen ? (
-                <ul className="write-line-height-menu" role="listbox" aria-label={t("write_select_line_height")}>
-                  {LINE_HEIGHTS.map((lh) => (
-                    <li key={lh.id} role="presentation">
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={lineHeightId === lh.id}
-                        className={`write-line-height-option${lineHeightId === lh.id ? " is-active" : ""}`}
-                        onClick={() => {
-                          setLineHeightId(lh.id);
-                          setLineHeightMenuOpen(false);
-                        }}
-                      >
-                        {lh.label}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-
-            <div className="write-line-width-picker">
-              <button
-                type="button"
-                className="write-icon-btn write-line-width-btn"
-                title={t("write_line_width")}
-                aria-expanded={lineWidthMenuOpen}
-                aria-haspopup="listbox"
-                aria-label={t("write_line_width")}
-                onClick={() => {
-                  setSizeMenuOpen(false);
-                  setLineHeightMenuOpen(false);
-                  setLineWidthMenuOpen((v) => !v);
-                }}
-              >
-                <span className="write-line-width-icon" aria-hidden>
-                  <span className="write-line-width-bar write-line-width-bar--short" />
-                  <span className="write-line-width-bar write-line-width-bar--medium" />
-                  <span className="write-line-width-bar write-line-width-bar--long" />
-                </span>
-              </button>
-              {lineWidthMenuOpen ? (
-                <ul className="write-line-width-menu" role="listbox" aria-label={t("write_select_line_width")}>
-                  {LINE_WIDTHS.map((lw) => (
-                    <li key={lw.id} role="presentation">
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={lineWidthId === lw.id}
-                        className={`write-line-width-option${lineWidthId === lw.id ? " is-active" : ""}`}
-                        onClick={() => {
-                          setLineWidthId(lw.id);
-                          setLineWidthMenuOpen(false);
-                        }}
-                      >
-                        {lw.label}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-
-            <button
-              type="button"
-              className={`write-icon-btn write-focus-btn${focusMode ? " is-active" : ""}`}
-              title={focusMode ? t("write_exit_focus_mode_shortcut") : t("write_focus_mode_shortcut")}
-              aria-label={t("write_focus_mode")}
-              onClick={() => setFocusMode((v) => !v)}
-            >
-              <span className="write-focus-icon" aria-hidden>
-                <span />
-                <span />
-                <span />
-                <span />
-              </span>
-            </button>
-          </div>
-        </div>
-
-        <aside className={`write-left-sidebar${sidebarOpen ? " is-open" : ""}`}>
-          <div className="write-left-inner card">
-            <div className="write-left-head">
-              <strong>{t("write_chapters")}</strong>
-              <button type="button" className="btn btn-ghost" style={{ fontSize: "0.85rem" }} onClick={(e) => { e.stopPropagation(); void onAddChapter(); }}>
-                {t("write_new_chapter")}
-              </button>
-            </div>
-            <div className="chapter-list stack-sm">
-              {chapters.length === 0 ? (
-                <p className="muted" style={{ margin: 0, fontSize: "0.88rem" }}>
-                  {t("write_no_chapters")}
-                </p>
-              ) : (
-                chapters.map((c, idx) => (
-                  <div key={c.id} className="chapter-row">
-                    <button
-                      type="button"
-                      className={`chapter-item${c.id === activeId ? " active" : ""}`}
-                      onClick={(e) => { e.stopPropagation(); void selectChapter(c.id); }}
-                    >
-                      {`${t("write_chapter_n")}${idx + 1}${t("write_chapter_n_suffix")}${c.title?.trim() ? ` ${c.title.trim()}` : ""}`}
-                    </button>
-                    <button
-                      type="button"
-                      className="chapter-del"
-                      title={t("write_delete_chapter")}
-                      aria-label={t("write_delete_chapter")}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void onDeleteChapterById(c.id);
-                      }}
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </aside>
+        <ChapterSidebar
+          chapters={chapters}
+          activeId={activeId}
+          sidebarOpen={sidebarOpen}
+          onSelectChapter={selectChapter}
+          onAddChapter={onAddChapter}
+          onDeleteChapter={onDeleteChapterById}
+        />
 
         <div className="write-main write-main--with-rail">
           <div className="card write-editor-card">
             {activeId ? (
               <>
                 <div className="write-editor-header">
-                  <input
-                    className="editor-title editor-title--improved"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder={t("write_chapter_title_placeholder")}
-                  />
-                  {!focusMode ? (
-                    <div className="write-chapter-actions" aria-label={t("write_chapter_actions")}>
+                  <div className="write-editor-title-row">
+                    <div className="write-editor-nav">
                       <button
                         type="button"
-                        className="write-chapter-action"
-                        disabled={!hasLlm || evaluateBusy || busy || !activeId}
-                        onClick={() => void onRunEvaluate()}
+                        className="write-icon-btn write-nav-btn"
+                        disabled={!hasPrevChapter}
+                        title={t("write_prev_chapter")}
+                        aria-label={t("write_prev_chapter")}
+                        onClick={goToPrevChapter}
                       >
-                        {evaluateBusy ? t("write_evaluating") : t("write_tool_evaluate")}
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5" /></svg>
                       </button>
                       <button
                         type="button"
-                        className={`write-chapter-action${rightTool === "versions" ? " is-active" : ""}`}
-                        disabled={!activeId}
-                        onClick={toggleVersionsPanel}
+                        className="write-icon-btn write-nav-btn"
+                        disabled={!hasNextChapter}
+                        title={t("write_next_chapter")}
+                        aria-label={t("write_next_chapter")}
+                        onClick={goToNextChapter}
                       >
-                        {t("write_tool_versions")}
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3l5 5-5 5" /></svg>
                       </button>
                     </div>
-                  ) : null}
+                    <input
+                      className="editor-title editor-title--improved"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder={t("write_chapter_title_placeholder")}
+                    />
+                  </div>
+                  <div className="write-editor-subtitle-row">
+                    <div className="write-chapter-meta">
+                      <button
+                        type="button"
+                        className="write-summary-toggle"
+                        onClick={() => setSummaryOpen((v) => !v)}
+                        aria-expanded={summaryOpen}
+                        aria-label={summaryOpen ? t("write_summary_collapse") : t("write_summary_expand")}
+                      >
+                        <svg className={`write-summary-toggle__chevron${summaryOpen ? " is-open" : ""}`} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5l3 3 3-3" /></svg>
+                        <span className="write-summary-toggle__label">{t("write_chapter_summary")}</span>
+                      </button>
+                      <span className={`write-save-status write-save-status--${saveStatus}`}>
+                        {saveStatus === "saving" && <span className="write-save-dot write-save-dot--saving" aria-hidden />}
+                        {saveStatus === "saved" && <span className="write-save-dot write-save-dot--saved" aria-hidden />}
+                        {saveStatus === "unsaved" && <span className="write-save-dot write-save-dot--unsaved" aria-hidden />}
+                        {saveStatus === "saving" ? t("write_saving") : saveStatus === "saved" ? t("write_saved") : t("write_save_unsaved")}
+                      </span>
+                    </div>
+                    {!focusMode ? (
+                      <div className="write-chapter-actions" role="group" aria-label={t("write_chapter_actions")}>
+                        <button
+                          type="button"
+                          className="write-chapter-action"
+                          disabled={!hasLlm || evaluateBusy || busy || !activeId}
+                          onClick={() => void onRunEvaluate()}
+                        >
+                          {evaluateBusy ? t("write_evaluating") : t("write_tool_evaluate")}
+                        </button>
+                        <button
+                          type="button"
+                          className={`write-chapter-action${rightTool === "versions" ? " is-active" : ""}`}
+                          disabled={!activeId}
+                          onClick={toggleVersionsPanel}
+                        >
+                          {t("write_tool_versions")}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  {summaryOpen && (
+                    <div className="write-summary-panel">
+                      <textarea
+                        className="textarea write-summary-textarea"
+                        rows={3}
+                        value={summary}
+                        onChange={(e) => setSummary(e.target.value)}
+                        placeholder={t("write_chapter_summary_placeholder")}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className={`write-body-wrapper write-body-wrapper--${lineWidthId}`}>
                   <div className="field write-body-field">
                     <textarea
                       ref={bodyTextareaRef}
-                      className={`textarea editor-body editor-body--line-height-${lineHeightId}`}
+                      className={`textarea editor-body editor-body--line-height-${lineHeightId}${typewriterMode === "on" ? " editor-body--typewriter" : ""}`}
                       style={{ fontSize: `${bodyFontSizePx}px` }}
                       value={content}
                       onChange={(e) => setContent(e.target.value)}
@@ -1758,55 +1390,6 @@ export default function NovelWrite() {
                     />
                   </div>
                 </div>
-                {selectionPanel ? (
-                  <div className="write-inline-result" role="status">
-                    <div className="write-inline-result__head">
-                      <span>
-                        {selectionPanel.mode === "rewrite" && t("write_selection_rewrite_title")}
-                        {selectionPanel.mode === "expand" && t("write_selection_expand_title")}
-                        {selectionPanel.mode === "polish" && t("write_selection_polish_title")}
-                        {selectionPanel.mode === "append" && t("write_selection_append_title")}
-                      </span>
-                      <button type="button" className="write-inline-result__close" onClick={closeSelectionPanel}>
-                        {t("write_selection_exit")}
-                      </button>
-                    </div>
-                    <div className="write-inline-result__body">
-                      {selectionPanel.streaming || (busy ? t("write_generating") : "")}
-                    </div>
-                    <div className="write-inline-result__actions">
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        disabled={busy || !selectionPanel.text.trim()}
-                        onClick={applySelectionReplace}
-                      >
-                        {selectionPanel.mode === "append" ? t("write_selection_insert") : t("write_selection_replace")}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        disabled={busy || !selectionPanel.text.trim()}
-                        onClick={() => void copySelectionResult()}
-                      >
-                        {t("write_selection_copy")}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        disabled={busy}
-                        onClick={() =>
-                          void runSelectionAi(selectionPanel.mode, {
-                            start: selectionPanel.start,
-                            end: selectionPanel.end,
-                          })
-                        }
-                      >
-                        {t("write_selection_regenerate")}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
                 {evaluateResult ? (
                   <div className="write-inline-result write-inline-result--eval">
                     <div className="write-inline-result__head">
@@ -1854,7 +1437,7 @@ export default function NovelWrite() {
                     <button
                       type="button"
                       className="btn btn-ghost write-exit-focus-btn"
-                      onClick={() => setFocusMode(false)}
+                      onClick={() => setFocusMode(() => false)}
                     >
                       {t("write_exit_focus_mode_esc")}
                     </button>
@@ -1862,7 +1445,7 @@ export default function NovelWrite() {
                 </div>
               </>
             ) : (
-              <p className="muted write-empty-hint" style={{ margin: 0 }}>
+              <p className="muted write-empty-hint">
                 {focusMode ? t("write_select_or_create_chapter") : t("write_select_chapter_or_new")}
               </p>
             )}
@@ -1973,53 +1556,26 @@ export default function NovelWrite() {
                       />
                       <span>{t("write_lock_title_desc")}</span>
                     </label>
-                    <div className="field">
-                      <label htmlFor="write-ai-word-count">{t("write_target_word_count")}</label>
-                      <select
-                        id="write-ai-word-count"
-                        className="select"
-                        value={generateWordCount ?? ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setGenerateWordCount(val ? parseInt(val, 10) : null);
-                        }}
-                      >
-                        <option value="">{t("write_word_count_ai_decide")}</option>
-                        <option value="500">500 {t("write_stat_words")}</option>
-                        <option value="1000">1000 {t("write_stat_words")}</option>
-                        <option value="1500">1500 {t("write_stat_words")}</option>
-                        <option value="2000">2000 {t("write_stat_words")}</option>
-                        <option value="2500">2500 {t("write_stat_words")}</option>
-                        <option value="3000">3000 {t("write_stat_words")}</option>
-                        <option value="3500">3500 {t("write_stat_words")}</option>
-                        <option value="4000">4000 {t("write_stat_words")}</option>
-                      </select>
-                      <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.8rem" }}>
-                        {t("write_word_count_approx")}
-                      </p>
-                    </div>
-                    <div className="field" style={{ marginBottom: "1rem" }}>
+                    <div className="field write-field-mb">
                       <label>{t("write_generate_mode")}</label>
-                      <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.25rem" }}>
+                      <div className="write-generate-mode-row">
                         <button
                           type="button"
-                          className={`btn ${generateMode === "foreground" ? "btn-primary" : "btn-ghost"}`}
+                          className={`btn ${generateMode === "foreground" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
                           onClick={() => setGenerateMode("foreground")}
-                          style={{ flex: 1 }}
                         >
                           {t("write_foreground_realtime")}
                         </button>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "background" ? "btn-primary" : "btn-ghost"}`}
+                          className={`btn ${generateMode === "background" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
                           onClick={() => setGenerateMode("background")}
-                          style={{ flex: 1 }}
                         >
                           {t("write_background_leave")}
                         </button>
                       </div>
                       {generateMode === "background" && (
-                        <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.8rem" }}>
+                        <p className="muted write-hint-sm--top">
                           {t("write_background_desc")}
                         </p>
                       )}
@@ -2034,10 +1590,10 @@ export default function NovelWrite() {
                     </button>
 
                     {generateMode === "foreground" && busy && currentProgress ? (
-                      <pre className="write-generate-log" style={{ marginTop: "0.5rem" }}>
+                      <pre className="write-generate-log">
                         {currentProgress.message}
                         {currentProgress.detail && (
-                          <span style={{ color: "var(--muted)", fontSize: "0.875rem", display: "block", marginTop: "0.25rem" }}>
+                          <span className="write-generate-log-detail">
                             {currentProgress.detail.length > 100 ? currentProgress.detail.slice(0, 100) + "..." : currentProgress.detail}
                           </span>
                         )}
@@ -2045,20 +1601,19 @@ export default function NovelWrite() {
                     ) : null}
 
                     {previewResult ? (
-                      <div className="stack-sm" style={{ marginTop: "1rem" }}>
+                      <div className="stack-sm write-eval-block">
                         <div
                           className={`card ${
                             previewResult.needs_revision ? "border-warning" : "border-success"
-                          }`}
-                          style={{ padding: "0.75rem", borderRadius: "0.5rem", borderLeft: "4px solid" }}
+                          } write-preview-card`}
                         >
-                          <p style={{ margin: 0, fontWeight: 500 }}>
+                          <p className="write-preview-card-title">
                             {previewResult.needs_revision
                               ? t("write_preview_low_score")
                               : t("write_preview_ready")}
                           </p>
                           {previewResult.evaluate_result && (
-                            <p style={{ margin: "0.25rem 0 0", fontSize: "0.875rem" }}>
+                            <p className="write-preview-card-sub">
                               {t("write_deai_score").replace("{score}", String(previewResult.evaluate_result.de_ai_score))}
                               {previewResult.evaluate_result.issues.length > 0 && (
                                 <span>{t("write_issues_found").replace("{count}", String(previewResult.evaluate_result.issues.length))}</span>
@@ -2066,7 +1621,7 @@ export default function NovelWrite() {
                             </p>
                           )}
                         </div>
-                        <div className="write-preview-actions" style={{ display: "flex", gap: "0.5rem" }}>
+                        <div className="write-preview-actions">
                           <button
                             type="button"
                             className="btn btn-primary"
@@ -2109,36 +1664,11 @@ export default function NovelWrite() {
                       />
                     </div>
                     {!isLatestChapter ? (
-                      <p className="muted" style={{ margin: "-0.2rem 0 0.85rem", fontSize: "0.84rem" }}>
+                      <p className="muted write-batch-note">
                         {t("write_batch_latest_only_note")}
                       </p>
                     ) : null}
-                    <div className="field">
-                      <label htmlFor="write-ai-batch-word-count">{t("write_per_chapter_word_count")}</label>
-                      <select
-                        id="write-ai-batch-word-count"
-                        className="select"
-                        value={generateWordCount ?? ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setGenerateWordCount(val ? parseInt(val, 10) : null);
-                        }}
-                      >
-                        <option value="">{t("write_word_count_ai_decide")}</option>
-                        <option value="500">500 {t("write_stat_words")}</option>
-                        <option value="1000">1000 {t("write_stat_words")}</option>
-                        <option value="1500">1500 {t("write_stat_words")}</option>
-                        <option value="2000">2000 {t("write_stat_words")}</option>
-                        <option value="2500">2500 {t("write_stat_words")}</option>
-                        <option value="3000">3000 {t("write_stat_words")}</option>
-                        <option value="3500">3500 {t("write_stat_words")}</option>
-                        <option value="4000">4000 {t("write_stat_words")}</option>
-                      </select>
-                      <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.8rem" }}>
-                        {t("write_word_count_approx")}
-                      </p>
-                    </div>
-                    <div className="field">
+                    <div className="field write-field-mb">
                       <div className="write-ai-field-label">
                         <label htmlFor="write-ai-batch-summary">{t("write_overall_summary")}</label>
                         <button
@@ -2179,28 +1709,26 @@ export default function NovelWrite() {
                         placeholder={t("write_batch_summary_placeholder")}
                       />
                     </div>
-                    <div className="field" style={{ marginBottom: "1rem" }}>
+                    <div className="field write-field-mb">
                       <label>{t("write_generate_mode")}</label>
-                      <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.25rem" }}>
+                      <div className="write-generate-mode-row">
                         <button
                           type="button"
-                          className={`btn ${generateMode === "foreground" ? "btn-primary" : "btn-ghost"}`}
+                          className={`btn ${generateMode === "foreground" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
                           onClick={() => setGenerateMode("foreground")}
-                          style={{ flex: 1 }}
                         >
                           {t("write_foreground_realtime")}
                         </button>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "background" ? "btn-primary" : "btn-ghost"}`}
+                          className={`btn ${generateMode === "background" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
                           onClick={() => setGenerateMode("background")}
-                          style={{ flex: 1 }}
                         >
                           {t("write_background_leave")}
                         </button>
                       </div>
                       {generateMode === "background" && (
-                        <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.8rem" }}>
+                        <p className="muted write-hint-sm--top">
                           {t("write_background_batch_desc")}
                         </p>
                       )}
@@ -2295,7 +1823,7 @@ export default function NovelWrite() {
                   {busy ? t("write_generating") : t("write_naming_generate")}
                 </button>
                 {namingResult && namingResult.length > 0 ? (
-                  <div className="write-naming-results stack-sm" style={{ marginTop: "1rem" }}>
+                  <div className="write-naming-results stack-sm">
                     {namingResult.map((name, idx) => (
                       <button
                         key={idx}
@@ -2316,7 +1844,7 @@ export default function NovelWrite() {
                 <p className="hint">
                 {t("write_evaluate_title")}
                 </p>
-                <p className="muted" style={{ margin: "0.25rem 0 0.75rem", fontSize: "0.82rem" }}>
+                <p className="muted write-eval-hint">
                 </p>
                 <button
                   type="button"
@@ -2327,20 +1855,20 @@ export default function NovelWrite() {
                   {evaluateBusy ? t("write_evaluating") : t("write_evaluate_chapter")}
                 </button>
                 {evaluateResult ? (
-                  <div className="write-eval-block" style={{ marginTop: "1rem" }}>
+                  <div className="write-eval-block">
                     <div className="write-eval-score" aria-label={t("write_deai_score_aria")}>
                       <span className="write-eval-score-num">{evaluateResult.de_ai_score}</span>
                       <span className="write-eval-score-denom">/ 100</span>
                       <span className="muted write-eval-score-label">{t("write_deai_score_desc")}</span>
                     </div>
                     {evaluateResult.issues.length === 0 ? (
-                      <p className="muted" style={{ margin: "0.75rem 0 0", fontSize: "0.9rem" }}>
+                      <p className="muted write-eval-no-issues">
                         {t("write_evaluate_no_issues")}
                       </p>
                     ) : (
-                      <ul className="write-eval-issues stack-sm" style={{ margin: "0.75rem 0 0", paddingLeft: "1.1rem" }}>
+                      <ul className="write-eval-issues-inline stack-sm">
                         {evaluateResult.issues.map((it, i) => (
-                          <li key={i} style={{ fontSize: "0.9rem" }}>
+                          <li key={i} className="write-eval-issue-item">
                             <strong>{it.aspect}</strong>
                             <span className="muted">{t("write_eval_issue_separator")}</span>
                             {it.detail}
@@ -2371,11 +1899,11 @@ export default function NovelWrite() {
                   </div>
                   
                   {versionsLoading ? (
-                    <p className="muted" style={{ textAlign: "center", padding: "1rem" }}>
+                    <p className="muted write-version-empty">
                       {t("write_loading_versions")}
                     </p>
                   ) : versions.length === 0 ? (
-                    <p className="muted" style={{ textAlign: "center", padding: "1rem" }}>
+                    <p className="muted write-version-empty">
                       {t("write_no_versions")}
                     </p>
                   ) : (
@@ -2460,56 +1988,34 @@ export default function NovelWrite() {
                   )}
                   
                   {versionDiff && (
-                    <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}>
-                      <h4 style={{ margin: "0 0 0.5rem", fontSize: "0.95rem" }}>{t("write_version_diff_title")}</h4>
-                      <div style={{ display: "flex", gap: "1rem", marginBottom: "0.75rem", fontSize: "0.8rem" }}>
-                        <span style={{ color: "var(--success)" }}>{t("write_version_diff_added").replace("{count}", String(versionDiff.added_count))}</span>
-                        <span style={{ color: "var(--error)" }}>{t("write_version_diff_removed").replace("{count}", String(versionDiff.removed_count))}</span>
-                        <span style={{ color: "var(--warning)" }}>{t("write_version_diff_changed").replace("{count}", String(versionDiff.changed_count))}</span>
+                    <div className="write-version-diff-section">
+                      <h4 className="write-version-diff-header">{t("write_version_diff_title")}</h4>
+                      <div className="write-version-diff-stats">
+                        <span className="write-version-diff-stats--added">{t("write_version_diff_added").replace("{count}", String(versionDiff.added_count))}</span>
+                        <span className="write-version-diff-stats--removed">{t("write_version_diff_removed").replace("{count}", String(versionDiff.removed_count))}</span>
+                        <span className="write-version-diff-stats--changed">{t("write_version_diff_changed").replace("{count}", String(versionDiff.changed_count))}</span>
                       </div>
                       <div
                         className="version-diff-container"
-                        style={{
-                          maxHeight: "300px",
-                          overflowY: "auto",
-                          padding: "0.75rem",
-                          backgroundColor: "var(--card)",
-                          borderRadius: "4px",
-                          fontFamily: "monospace",
-                          fontSize: "0.8rem",
-                          lineHeight: "1.5",
-                        }}
                         dangerouslySetInnerHTML={{ __html: versionDiff.diff_html }}
                       />
                     </div>
                   )}
                   
                   {selectedVersion && !versionDiff && (
-                    <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}>
-                      <h4 style={{ margin: "0 0 0.5rem", fontSize: "0.95rem" }}>{t("write_version_preview_title")}</h4>
+                    <div className="write-version-preview-section">
+                      <h4 className="write-version-preview-title">{t("write_version_preview_title")}</h4>
                       {selectedVersion.summary && (
-                        <div style={{ marginBottom: "0.5rem" }}>
-                          <strong style={{ fontSize: "0.85rem" }}>{t("write_version_summary")}</strong>
-                          <p style={{ margin: "0.25rem 0", fontSize: "0.85rem", color: "var(--muted)" }}>
+                        <div className="write-mb-sm">
+                          <strong className="write-version-preview-summary-label">{t("write_version_summary")}</strong>
+                          <p className="write-version-preview-summary-text">
                             {selectedVersion.summary}
                           </p>
                         </div>
                       )}
                       <div>
-                        <strong style={{ fontSize: "0.85rem" }}>{t("write_version_content")}</strong>
-                        <pre
-                          style={{
-                            margin: "0.25rem 0",
-                            padding: "0.75rem",
-                            backgroundColor: "var(--card)",
-                            borderRadius: "4px",
-                            fontSize: "0.8rem",
-                            whiteSpace: "pre-wrap",
-                            wordBreak: "break-word",
-                            maxHeight: "200px",
-                            overflowY: "auto",
-                          }}
-                        >
+                        <strong className="write-version-preview-content-label">{t("write_version_content")}</strong>
+                        <pre className="write-version-preview-content-pre">
                           {selectedVersion.content}
                         </pre>
                       </div>
@@ -2522,69 +2028,70 @@ export default function NovelWrite() {
         </div>
       )}
 
-      {showSelectionBar && selectionMenuPos && (
+      {showSelectionBar && selectionMenuPos ? (
+        <SelectionFloatMenu
+          top={selectionMenuPos.top}
+          left={selectionMenuPos.left}
+          busy={busy}
+          onRunAi={(mode) => void runSelectionAi(mode)}
+          onAddToCharacter={() => void addSelectionToCharacter()}
+          onAddToMemo={() => void addSelectionToMemo()}
+        />
+      ) : null}
+
+      {selectionPanel && selectionMenuPos ? (
         <div
-          className="write-selection-float"
-          role="toolbar"
-          aria-label={t("write_selection_ai_aria")}
-          style={{ top: selectionMenuPos.top, left: selectionMenuPos.left }}
+          className="write-selection-result-float"
+          role="status"
+          style={{ top: selectionMenuPos.top + 8, left: selectionMenuPos.left }}
         >
-          <button
-            type="button"
-            className="write-selection-float__item"
-            disabled={busy}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => void runSelectionAi("rewrite")}
-          >
-            {t("write_selection_rewrite")}
-          </button>
-          <button
-            type="button"
-            className="write-selection-float__item"
-            disabled={busy}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => void runSelectionAi("expand")}
-          >
-            {t("write_selection_expand")}
-          </button>
-          <button
-            type="button"
-            className="write-selection-float__item"
-            disabled={busy}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => void runSelectionAi("polish")}
-          >
-            {t("write_selection_polish")}
-          </button>
-          <button
-            type="button"
-            className="write-selection-float__item"
-            disabled={busy}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => void runSelectionAi("append")}
-          >
-            {t("write_selection_append")}
-          </button>
-          <button
-            type="button"
-            className="write-selection-float__item"
-            disabled={busy}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => void addSelectionToCharacter()}
-          >
-            {t("write_selection_to_character")}
-          </button>
-          <button
-            type="button"
-            className="write-selection-float__item"
-            disabled={busy}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => void addSelectionToMemo()}
-          >
-            {t("write_selection_to_memo")}
-          </button>
+          <div className="write-selection-result-float__head">
+            <span>
+              {selectionPanel.mode === "rewrite" && t("write_selection_rewrite_title")}
+              {selectionPanel.mode === "expand" && t("write_selection_expand_title")}
+              {selectionPanel.mode === "polish" && t("write_selection_polish_title")}
+              {selectionPanel.mode === "append" && t("write_selection_append_title")}
+            </span>
+            <button type="button" className="write-selection-result-float__close" onClick={closeSelectionPanel}>
+              {t("write_selection_exit")}
+            </button>
+          </div>
+          <div className="write-selection-result-float__body">
+            {selectionPanel.streaming || (busy ? t("write_generating") : "")}
+          </div>
+          <div className="write-selection-result-float__actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !selectionPanel.text.trim()}
+              onClick={applySelectionReplace}
+            >
+              {selectionPanel.mode === "append" ? t("write_selection_insert") : t("write_selection_replace")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy || !selectionPanel.text.trim()}
+              onClick={() => void copySelectionResult()}
+            >
+              {t("write_selection_copy")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy}
+              onClick={() =>
+                void runSelectionAi(selectionPanel.mode, {
+                  start: selectionPanel.start,
+                  end: selectionPanel.end,
+                })
+              }
+            >
+              {t("write_selection_regenerate")}
+            </button>
+          </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

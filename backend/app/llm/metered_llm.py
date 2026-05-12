@@ -25,13 +25,17 @@ log = logging.getLogger(__name__)
 def get_effective_token_quota_used(db: Session, user: User) -> int:
     """Return the user's effective token usage for quota display/checks.
 
+    Only builtin usage counts against the quota. Custom LLM usage is tracked
+    separately but does not consume the quota.
+
     Older accounts may have usage events recorded while ``token_quota_used`` was
     still 0, especially when they were previously unlimited. Treat the usage
     event total as the source of truth unless the stored counter is higher.
     After an admin reset, only usage events after the reset point count.
     """
     usage_query = db.query(func.coalesce(func.sum(LLMUsageEvent.total_tokens), 0)).filter(
-        LLMUsageEvent.user_id == user.id
+        LLMUsageEvent.user_id == user.id,
+        LLMUsageEvent.source == "builtin",
     )
     if user.token_quota_reset_at is not None:
         usage_query = usage_query.filter(LLMUsageEvent.created_at >= user.token_quota_reset_at)
@@ -160,11 +164,12 @@ class LLMUsageAccumulator:
     最后只创建一条记录。
     """
 
-    def __init__(self, db: Session, user_id: int, provider: str, action: str) -> None:
+    def __init__(self, db: Session, user_id: int, provider: str, action: str, source: str = "builtin") -> None:
         self._db = db
         self._user_id = user_id
         self._provider = provider
         self._action = action
+        self._source = source
         self._input_tokens = 0
         self._output_tokens = 0
         self._call_count = 0
@@ -201,14 +206,15 @@ class LLMUsageAccumulator:
             return
         
         u.llm_call_count = int(u.llm_call_count or 0) + 1
-        
+
         total = self._input_tokens + self._output_tokens
-        if u.token_quota is not None:
+        if self._source == "builtin" and u.token_quota is not None:
             u.token_quota_used = get_effective_token_quota_used(self._db, u) + total
         
         evt = LLMUsageEvent(
             user_id=self._user_id,
             provider=self._provider,
+            source=self._source,
             action=self._action,
             input_tokens=self._input_tokens,
             output_tokens=self._output_tokens,
@@ -218,9 +224,10 @@ class LLMUsageAccumulator:
         self._db.commit()
         
         log.debug(
-            "flushed llm usage: user_id=%s action=%s calls=%s tokens=%s",
+            "flushed llm usage: user_id=%s action=%s source=%s calls=%s tokens=%s",
             self._user_id,
             self._action,
+            self._source,
             self._call_count,
             total,
         )
@@ -234,6 +241,7 @@ def _record_usage(
     action: str,
     input_text: str,
     output_text: str,
+    source: str = "builtin",
     accumulator: LLMUsageAccumulator | None = None,
 ) -> None:
     """记录 LLM 调用用量。
@@ -250,16 +258,17 @@ def _record_usage(
     u = db.get(User, user_id)
     if u is None:
         return
-    
+
     u.llm_call_count = int(u.llm_call_count or 0) + 1
-    
+
     total = in_tokens + out_tokens
-    if u.token_quota is not None:
+    if source == "builtin" and u.token_quota is not None:
         u.token_quota_used = get_effective_token_quota_used(db, u) + total
     
     evt = LLMUsageEvent(
         user_id=user_id,
         provider=provider,
+        source=source,
         action=action,
         input_tokens=in_tokens,
         output_tokens=out_tokens,
@@ -275,6 +284,7 @@ def llm_usage_session(
     user_id: int,
     provider: str,
     action: str,
+    source: str = "builtin",
 ) -> Iterator[LLMUsageAccumulator]:
     """创建一个 LLM 用量统计会话上下文管理器。
     
@@ -287,7 +297,7 @@ def llm_usage_session(
             # 多次 LLM 调用...
             # 最后只创建一条记录
     """
-    accumulator = LLMUsageAccumulator(db, user_id, provider, action)
+    accumulator = LLMUsageAccumulator(db, user_id, provider, action, source)
     try:
         yield accumulator
     finally:
@@ -307,6 +317,7 @@ class MeteredLLM(LLMProvider):
         *,
         provider: str,
         action: str,
+        source: str = "builtin",
         accumulator: "LLMUsageAccumulator | None" = None,
     ) -> None:
         self._inner = inner
@@ -314,6 +325,7 @@ class MeteredLLM(LLMProvider):
         self._user_id = user_id
         self._provider = provider
         self._action = action
+        self._source = source
         self._accumulator = accumulator
 
     def complete(self, system: str, user: str, *, max_tokens: int | None = None) -> str:
@@ -326,6 +338,7 @@ class MeteredLLM(LLMProvider):
                 action=self._action,
                 input_text=f"{system}\n{user}",
                 output_text=output_text,
+                source=self._source,
                 accumulator=self._accumulator,
             )
         except Exception:
@@ -347,6 +360,7 @@ class MeteredLLM(LLMProvider):
                     action=self._action,
                     input_text=f"{system}\n{user}",
                     output_text="".join(out_parts),
+                    source=self._source,
                     accumulator=self._accumulator,
                 )
             except Exception:

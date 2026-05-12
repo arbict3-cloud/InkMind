@@ -3,40 +3,20 @@ import { Link } from "react-router-dom";
 import { apiErrorMessage, fetchLlmProviders } from "@/api/client";
 import { useAuth } from "@/context/AuthContext";
 import { useI18n } from "@/i18n";
-
-const LLM_LABEL: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  qwen: "qwen",
-  deepseek: "DeepSeek",
-  minimax: "MiniMax",
-  kimi: "Kimi",
-};
-
-function llmLabel(id: string, t: (key: string) => string) {
-  const label = LLM_LABEL[id];
-  if (label === "qwen") {
-    return t("usermenu_model_qwen");
-  }
-  return label ?? id;
-}
+import type { LlmProvidersResponse } from "@/types";
 
 export default function UserMenu() {
   const { t } = useI18n();
   const { user, logout, updatePreferredLlm, refreshUser } = useAuth();
   const [open, setOpen] = useState(false);
-  const [llmOptions, setLlmOptions] = useState<string[]>([]);
-  const [defaultLlm, setDefaultLlm] = useState("");
+  const [providerInfo, setProviderInfo] = useState<LlmProvidersResponse | null>(null);
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchLlmProviders()
-      .then((m) => {
-        setLlmOptions(m.available);
-        setDefaultLlm(m.default);
-      })
+      .then((m) => setProviderInfo(m))
       .catch(() => {});
   }, []);
 
@@ -66,12 +46,17 @@ export default function UserMenu() {
     }
   }
 
+  const hasCustomGen = !!user?.generation_use_custom && !!user?.generation_custom_llm_id;
+  const hasCustomAgent = !!user?.agent_use_custom && !!user?.agent_custom_llm_id;
+  const builtinProviders = providerInfo?.builtin || [];
+  const defaultProvider = providerInfo?.default || "";
+
   const current =
-    user?.preferred_llm_provider && llmOptions.includes(user.preferred_llm_provider)
+    user?.preferred_llm_provider && builtinProviders.some((p) => p.id === user.preferred_llm_provider)
       ? user.preferred_llm_provider
-      : llmOptions.includes(defaultLlm)
-        ? defaultLlm
-        : llmOptions[0] || "";
+      : builtinProviders.some((p) => p.id === defaultProvider)
+        ? defaultProvider
+        : builtinProviders[0]?.id || "";
 
   return (
     <div className="user-menu-wrap" ref={wrapRef}>
@@ -82,15 +67,30 @@ export default function UserMenu() {
         aria-expanded={open}
       >
         {user?.display_name || user?.email || t("usermenu_user")}
-        <span className="user-menu-caret" aria-hidden>
-          ▾
-        </span>
+        <span className="user-menu-caret" aria-hidden>▾</span>
       </button>
       {open ? (
         <div className="user-menu-dropdown card" role="menu">
           <div className="user-menu-email muted">{user?.email}</div>
 
-          {llmOptions.length > 0 ? (
+          {hasCustomAgent && (
+            <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "var(--muted)" }}>
+              🤖 {t("usermenu_agent_configured")} <span style={{ opacity: 0.7 }}>({t("ai_settings_custom_tag")})</span>
+            </div>
+          )}
+          {!hasCustomAgent && builtinProviders.some((p) => p.id === "anthropic") && (
+            <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "var(--muted)" }}>
+              🤖 {t("usermenu_agent_builtin")}
+            </div>
+          )}
+
+          {hasCustomGen && (
+            <div style={{ marginTop: "0.25rem", fontSize: "0.85rem", color: "var(--muted)" }}>
+              ✍️ {t("usermenu_generation_configured")} <span style={{ opacity: 0.7 }}>({t("ai_settings_custom_tag")})</span>
+            </div>
+          )}
+
+          {!hasCustomGen && builtinProviders.length > 0 && (
             <div className="field" style={{ marginBottom: 0, marginTop: "0.75rem" }}>
               <label htmlFor="menu-llm">{t("usermenu_default_llm")}</label>
               <select
@@ -100,22 +100,31 @@ export default function UserMenu() {
                 disabled={saving}
                 onChange={(e) => onPickLlm(e.target.value)}
               >
-                {llmOptions.map((o) => (
-                  <option key={o} value={o}>
-                    {llmLabel(o, t)}
-                  </option>
+                {builtinProviders.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
                 ))}
               </select>
               <p className="hint" style={{ marginBottom: 0 }}>
                 {t("usermenu_llm_hint")}
               </p>
             </div>
-          ) : (
+          )}
+
+          {!hasCustomGen && builtinProviders.length === 0 && (
             <p className="hint" style={{ marginTop: "0.75rem" }}>
               {t("usermenu_no_llm_configured")}
             </p>
           )}
+
           {err ? <p className="form-error" style={{ marginTop: "0.5rem" }}>{err}</p> : null}
+          <Link
+            to="/settings"
+            className="btn btn-ghost"
+            style={{ width: "100%", marginTop: "0.75rem" }}
+            onClick={() => setOpen(false)}
+          >
+            {t("nav_ai_settings")}
+          </Link>
           <Link
             to="/usage"
             className="btn btn-ghost"

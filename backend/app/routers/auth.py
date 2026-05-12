@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import CurrentUser
-from app.models import User
+from app.models import User, UserCustomLLM
 from app.schemas.auth import Token, UserCreate, UserLogin, UserOut, UserUpdate
 from app.llm.providers import list_available_providers
 from app.security import create_access_token, hash_password, verify_password
@@ -51,6 +51,13 @@ def update_me(body: UserUpdate, user: CurrentUser, db: Session = Depends(get_db)
                 )
             user.preferred_llm_provider = low
 
+    if "preferred_llm_model" in data:
+        v = data["preferred_llm_model"]
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            user.preferred_llm_model = None
+        else:
+            user.preferred_llm_model = str(v).strip()
+
     if "agent_mode" in data:
         v = data["agent_mode"]
         valid_modes = ["flexible", "react", "direct"]
@@ -64,19 +71,13 @@ def update_me(body: UserUpdate, user: CurrentUser, db: Session = Depends(get_db)
     if "max_llm_iterations" in data:
         v = data["max_llm_iterations"]
         if v is not None and (v < 1 or v > 50):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="max_llm_iterations 必须在 1-50 之间",
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="max_llm_iterations 必须在 1-50 之间")
         user.max_llm_iterations = v or 10
 
     if "max_tokens_per_task" in data:
         v = data["max_tokens_per_task"]
         if v is not None and (v < 1000 or v > 500000):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="max_tokens_per_task 必须在 1000-500000 之间",
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="max_tokens_per_task 必须在 1000-500000 之间")
         user.max_tokens_per_task = v or 50000
 
     if "enable_auto_audit" in data:
@@ -88,20 +89,40 @@ def update_me(body: UserUpdate, user: CurrentUser, db: Session = Depends(get_db)
     if "auto_audit_min_score" in data:
         v = data["auto_audit_min_score"]
         if v is not None and (v < 0 or v > 100):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="auto_audit_min_score 必须在 0-100 之间",
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="auto_audit_min_score 必须在 0-100 之间")
         user.auto_audit_min_score = v or 60
 
     if "ai_language" in data:
         v = data["ai_language"]
         if v is not None and v not in ["zh", "en"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="ai_language 必须是 'zh' 或 'en'",
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ai_language 必须是 'zh' 或 'en'")
         user.ai_language = v
+
+    if "agent_use_custom" in data:
+        user.agent_use_custom = bool(data["agent_use_custom"])
+
+    if "agent_custom_llm_id" in data:
+        v = data["agent_custom_llm_id"]
+        if v is not None:
+            custom = db.get(UserCustomLLM, v)
+            if not custom or custom.user_id != user.id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="自定义 LLM 不存在")
+        user.agent_custom_llm_id = v
+
+    if "agent_model" in data:
+        v = data["agent_model"]
+        user.agent_model = v.strip() if v and v.strip() else None
+
+    if "generation_use_custom" in data:
+        user.generation_use_custom = bool(data["generation_use_custom"])
+
+    if "generation_custom_llm_id" in data:
+        v = data["generation_custom_llm_id"]
+        if v is not None:
+            custom = db.get(UserCustomLLM, v)
+            if not custom or custom.user_id != user.id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="自定义 LLM 不存在")
+        user.generation_custom_llm_id = v
 
     db.add(user)
     db.commit()

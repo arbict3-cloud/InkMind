@@ -41,5 +41,23 @@ def get_current_admin(
     return user
 
 
+def get_optional_user(
+    db: Annotated[Session, Depends(get_db)],
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+) -> User | None:
+    if creds is None or not creds.credentials:
+        return None
+    sub = decode_token(creds.credentials)
+    if sub is None:
+        return None
+    try:
+        user_id = int(sub)
+    except ValueError:
+        return None
+    user = db.get(User, user_id)
+    return user
+
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
 CurrentAdmin = Annotated[User, Depends(get_current_admin)]
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]

@@ -14,10 +14,10 @@ Claude 通过 ClaudeSDKClient 调用它们。
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import re
-import uuid
 from typing import Any
 
 from claude_agent_sdk import tool
@@ -30,31 +30,41 @@ from app.models import Chapter, Character, Novel, NovelMemo
 
 log = logging.getLogger(__name__)
 
-_db_session_factory: Any = None
-_novel_id: int = 0
-_session_id: str = ""
+_cv_db_session_factory: contextvars.ContextVar[Any] = contextvars.ContextVar("db_session_factory")
+_cv_novel_id: contextvars.ContextVar[int] = contextvars.ContextVar("novel_id", default=0)
+_cv_session_id: contextvars.ContextVar[str] = contextvars.ContextVar("session_id", default="")
+
 _DEFAULT_TARGET_WORD_COUNT = 1800
 _CONTEXT_PACK_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def init_tool_context(db_session_factory: Any, novel_id: int, session_id: str = "") -> None:
-    global _db_session_factory, _novel_id, _session_id
-    _db_session_factory = db_session_factory
-    _novel_id = novel_id
-    _session_id = session_id
+    _cv_db_session_factory.set(db_session_factory)
+    _cv_novel_id.set(novel_id)
+    _cv_session_id.set(session_id)
 
 
 def _get_db() -> Session:
-    if _db_session_factory is None:
+    factory = _cv_db_session_factory.get(None)
+    if factory is None:
         raise RuntimeError("工具上下文未初始化：请先调用 init_tool_context()")
-    return _db_session_factory()
+    return factory()
+
+
+def _get_novel_id() -> int:
+    return _cv_novel_id.get()
+
+
+def _get_session_id() -> str:
+    return _cv_session_id.get()
 
 
 def _get_novel() -> Novel:
     db = _get_db()
-    novel = db.query(Novel).filter(Novel.id == _novel_id).first()
+    novel_id = _get_novel_id()
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
     if novel is None:
-        raise ValueError(f"小说 {_novel_id} 不存在")
+        raise ValueError(f"小说 {novel_id} 不存在")
     return novel
 
 
@@ -85,7 +95,7 @@ def _extract_target_word_count(value: Any) -> int:
 
 
 def _context_pack_cache_key() -> str:
-    return f"{_session_id or 'default'}:{_novel_id}"
+    return f"{_get_session_id() or 'default'}:{_get_novel_id()}"
 
 
 def _invalidate_context_pack_cache() -> None:
@@ -288,10 +298,11 @@ async def get_chapters(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def get_chapter_detail(args: dict[str, Any]) -> dict[str, Any]:
     db = _get_db()
+    novel_id = _get_novel_id()
     chapter_id = args["chapter_id"]
     chapter = db.query(Chapter).filter(
         Chapter.id == chapter_id,
-        Chapter.novel_id == _novel_id,
+        Chapter.novel_id == novel_id,
     ).first()
     if not chapter:
         db.close()
@@ -299,7 +310,7 @@ async def get_chapter_detail(args: dict[str, Any]) -> dict[str, Any]:
 
     chapter_number = (
         db.query(Chapter)
-        .filter(Chapter.novel_id == _novel_id, Chapter.sort_order <= chapter.sort_order)
+        .filter(Chapter.novel_id == novel_id, Chapter.sort_order <= chapter.sort_order)
         .count()
     )
 
@@ -323,8 +334,9 @@ async def get_chapter_detail(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def get_characters(args: dict[str, Any]) -> dict[str, Any]:
     db = _get_db()
+    novel_id = _get_novel_id()
     name_filter = args.get("name_filter")
-    query = db.query(Character).filter(Character.novel_id == _novel_id)
+    query = db.query(Character).filter(Character.novel_id == novel_id)
     if name_filter:
         query = query.filter(Character.name.contains(name_filter))
     characters = query.all()
@@ -345,7 +357,8 @@ async def get_characters(args: dict[str, Any]) -> dict[str, Any]:
 @tool("get_memos", "获取小说的备忘录列表。", {})
 async def get_memos(args: dict[str, Any]) -> dict[str, Any]:
     db = _get_db()
-    memos = db.query(NovelMemo).filter(NovelMemo.novel_id == _novel_id).all()
+    novel_id = _get_novel_id()
+    memos = db.query(NovelMemo).filter(NovelMemo.novel_id == novel_id).all()
     items = [
         {"id": m.id, "title": m.title, "body": (m.body or "")[:500]}
         for m in memos
@@ -361,10 +374,11 @@ async def get_memos(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def get_writing_context_pack(args: dict[str, Any]) -> dict[str, Any]:
     db = _get_db()
-    novel = db.query(Novel).filter(Novel.id == _novel_id).first()
+    novel_id = _get_novel_id()
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
     if novel is None:
         db.close()
-        raise ValueError(f"小说 {_novel_id} 不存在")
+        raise ValueError(f"小说 {novel_id} 不存在")
     result = _get_cached_writing_context_pack(
         db,
         novel,
@@ -439,7 +453,8 @@ async def dispatch_generation_task(args: dict[str, Any]) -> dict[str, Any]:
     if task_type == "generate_chapter" and "context_pack" not in params:
         db = _get_db()
         try:
-            novel = db.query(Novel).filter(Novel.id == _novel_id).first()
+            novel_id = _get_novel_id()
+            novel = db.query(Novel).filter(Novel.id == novel_id).first()
             if novel is not None:
                 params["context_pack"] = _get_cached_writing_context_pack(
                     db,
@@ -528,6 +543,7 @@ async def poll_multiple_tasks(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def save_chapter(args: dict[str, Any]) -> dict[str, Any]:
     db = _get_db()
+    novel_id = _get_novel_id()
     title = args["title"]
     content = args["content"]
     summary = args.get("summary", "")
@@ -535,12 +551,12 @@ async def save_chapter(args: dict[str, Any]) -> dict[str, Any]:
 
     if sort_order is None:
         max_order = db.scalar(
-            select(func.max(Chapter.sort_order)).where(Chapter.novel_id == _novel_id)
+            select(func.max(Chapter.sort_order)).where(Chapter.novel_id == novel_id)
         )
         sort_order = (max_order or 0) + 1
 
     chapter = Chapter(
-        novel_id=_novel_id,
+        novel_id=novel_id,
         title=title,
         content=content,
         summary=summary,
@@ -551,7 +567,7 @@ async def save_chapter(args: dict[str, Any]) -> dict[str, Any]:
     db.refresh(chapter)
     chapter_number = (
         db.query(Chapter)
-        .filter(Chapter.novel_id == _novel_id, Chapter.sort_order <= chapter.sort_order)
+        .filter(Chapter.novel_id == novel_id, Chapter.sort_order <= chapter.sort_order)
         .count()
     )
 
@@ -574,6 +590,7 @@ async def save_chapter(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def delete_chapter(args: dict[str, Any]) -> dict[str, Any]:
     db = _get_db()
+    novel_id = _get_novel_id()
     chapter_id = args["chapter_id"]
 
     chapter = db.get(Chapter, chapter_id)
@@ -581,7 +598,7 @@ async def delete_chapter(args: dict[str, Any]) -> dict[str, Any]:
         db.close()
         return {"content": [{"type": "text", "text": json.dumps({"success": False, "error": f"章节 {chapter_id} 不存在"}, ensure_ascii=False)}]}
 
-    if chapter.novel_id != _novel_id:
+    if chapter.novel_id != novel_id:
         db.close()
         return {"content": [{"type": "text", "text": json.dumps({"success": False, "error": "章节不属于当前作品"}, ensure_ascii=False)}]}
 

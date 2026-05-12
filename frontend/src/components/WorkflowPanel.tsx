@@ -73,7 +73,6 @@ export default function WorkflowPanel({
   const [createForm, setCreateForm] = useState({
     chapterSummary: "",
     fixedTitle: "",
-    wordCount: null as number | null,
   });
 
   const [modifications, setModifications] = useState<Record<string, unknown>>({});
@@ -113,9 +112,6 @@ export default function WorkflowPanel({
       if (createForm.fixedTitle.trim()) {
         payload.fixed_title = createForm.fixedTitle.trim();
       }
-      if (createForm.wordCount) {
-        payload.word_count = createForm.wordCount;
-      }
 
       const result = await createWorkflow(novelId, payload);
       setWorkflowId(result.workflow_id);
@@ -123,7 +119,7 @@ export default function WorkflowPanel({
       setStoredWorkflowId(novelId, result.workflow_id);
       onWorkflowStateChange?.(result.workflow_id, result.progress);
       setShowCreateModal(false);
-      setCreateForm({ chapterSummary: "", fixedTitle: "", wordCount: null });
+      setCreateForm({ chapterSummary: "", fixedTitle: "" });
       setModifications({});
       message.success(t("workflow_create_success"));
     } catch (error) {
@@ -580,29 +576,6 @@ export default function WorkflowPanel({
               onChange={(e) => setCreateForm({ ...createForm, fixedTitle: e.target.value })}
               placeholder={t("workflow_fixed_title_placeholder")}
             />
-          </div>
-
-          <div className="field">
-            <label>
-              <span className="label-text">{t("workflow_word_count")}</span>
-              <span className="label--optional">{t("workflow_word_count_hint")}</span>
-            </label>
-            <select
-              className="input"
-              value={createForm.wordCount ?? ""}
-              onChange={(e) =>
-                setCreateForm({
-                  ...createForm,
-                  wordCount: e.target.value ? Number(e.target.value) : null,
-                })
-              }
-            >
-              <option value="">{t("workflow_word_count_default")}</option>
-              <option value="1000">1000 {t("workflow_words")}</option>
-              <option value="2000">2000 {t("workflow_words")}</option>
-              <option value="3000">3000 {t("workflow_words")}</option>
-              <option value="4000">4000 {t("workflow_words")}</option>
-            </select>
           </div>
         </div>
       </Modal>

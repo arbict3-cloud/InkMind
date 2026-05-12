@@ -1,81 +1,128 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
-  Layout,
-  Card,
-  Form,
-  InputNumber,
-  Button,
-  Alert,
-  Typography,
-  Space,
-  message,
-  Row,
-  Col,
-  Select,
-  Switch,
-  Dropdown,
-  Avatar,
+  Layout, Card, Form, InputNumber, Button, Alert, Typography, Space,
+  message, Row, Col, Select, Switch, Input, Tooltip, Modal, Tag, Spin,
+  Popconfirm,
 } from "antd";
 import {
-  SaveOutlined,
-  ArrowLeftOutlined,
-  SettingOutlined,
-  RobotOutlined,
-  CheckCircleOutlined,
-  SafetyOutlined,
-  EyeOutlined,
-  GoldOutlined,
-  SunOutlined,
-  MoonOutlined,
-  UserOutlined,
-  BarChartOutlined,
-  HistoryOutlined,
-  LogoutOutlined,
-  GlobalOutlined,
+  SaveOutlined, ArrowLeftOutlined, SettingOutlined, RobotOutlined,
+  CheckCircleOutlined, SafetyOutlined, EyeOutlined, GoldOutlined,
+  GlobalOutlined, ThunderboltOutlined, QuestionCircleOutlined,
+  PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, SwapOutlined,
+  LinkOutlined,
 } from "@ant-design/icons";
-import { useNavigate } from "react-router-dom";
+import AppHeader, { useHeaderTheme } from "@/components/AppHeader";
 import { useAuth } from "@/context/AuthContext";
-import { useTheme } from "@/context/ThemeContext";
 import { useNavigation } from "@/context/NavigationContext";
 import { useI18n } from "@/i18n";
+import {
+  fetchLlmProviders,
+  createCustomLLM,
+  updateCustomLLM,
+  deleteCustomLLM,
+} from "@/api/client";
+import type { LlmProvidersResponse, CustomLlmInfo } from "@/types";
 
-const { Header, Content } = Layout;
+const { Content } = Layout;
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
+const { Password } = Input;
 
 type AgentMode = "flexible" | "react" | "direct";
 
+const ALL_PROVIDERS = [
+  { value: "openai", label: "OpenAI", defaultUrl: "https://api.openai.com/v1" },
+  { value: "qwen", label: "Qwen / 通义千问", defaultUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+  { value: "deepseek", label: "DeepSeek", defaultUrl: "https://api.deepseek.com" },
+  { value: "minimax", label: "MiniMax", defaultUrl: "https://api.minimax.io/v1" },
+  { value: "kimi", label: "Kimi / 月之暗面", defaultUrl: "https://api.moonshot.ai/v1" },
+  { value: "glm", label: "GLM / 智谱", defaultUrl: "https://open.bigmodel.cn/api/paas/v4" },
+  { value: "anthropic", label: "Anthropic", defaultUrl: "https://api.anthropic.com" },
+];
+
+function isMasked(value: string | null | undefined): boolean {
+  return !!value && value.includes("***");
+}
+
+type ProviderValue =
+  | { kind: "builtin"; providerId: string }
+  | { kind: "custom"; customLlmId: number };
+
+function decodeProviderValue(s: string): ProviderValue {
+  if (s.startsWith("builtin:")) return { kind: "builtin", providerId: s.slice(8) };
+  if (s.startsWith("custom:")) return { kind: "custom", customLlmId: Number(s.slice(7)) };
+  return { kind: "builtin", providerId: s };
+}
+
 export default function AiSettings() {
-  const { user, updateAiSettings, logout } = useAuth();
-  const { theme, setTheme, isDark } = useTheme();
-  const { t, setLanguage, isZh } = useI18n();
-  const nav = useNavigate();
+  const { user, updateAiSettings, refreshUser } = useAuth();
+  const { t } = useI18n();
+  const colors = useHeaderTheme();
+  const { goBackSmart } = useNavigation();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
-  const { goBackSmart } = useNavigation();
 
-  const getAgentModeLabel = (mode: AgentMode): string => {
-    const map: Record<AgentMode, string> = {
-      flexible: "ai_settings_flexible",
-      react: "ai_settings_react",
-      direct: "ai_settings_direct",
-    };
-    return t(map[mode]);
-  };
+  const [providerInfo, setProviderInfo] = useState<LlmProvidersResponse | null>(null);
 
-  const getAgentModeDescription = (mode: AgentMode): string => {
-    const map: Record<AgentMode, string> = {
-      flexible: "ai_settings_flexible_desc",
-      react: "ai_settings_react_desc",
-      direct: "ai_settings_direct_desc",
-    };
-    return t(map[mode]);
-  };
+  const [genProviderValue, setGenProviderValue] = useState<string>("");
+  const [genModel, setGenModel] = useState<string>("");
+  const [genSaving, setGenSaving] = useState(false);
+
+  const [agentProviderValue, setAgentProviderValue] = useState<string>("builtin:anthropic");
+  const [agentModel, setAgentModel] = useState<string>("");
+  const [agentSaving, setAgentSaving] = useState(false);
+
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingCustom, setEditingCustom] = useState<CustomLlmInfo | null>(null);
+  const [addForm] = Form.useForm();
+  const [editForm] = Form.useForm();
+  const [addSaving, setAddSaving] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+
+  const loadProviderInfo = useCallback(async () => {
+    try {
+      const data = await fetchLlmProviders();
+      setProviderInfo(data);
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
-    if (!user) return;
+    loadProviderInfo();
+  }, [loadProviderInfo]);
+
+  useEffect(() => {
+    if (!user || !providerInfo) return;
+
+    if (user.generation_use_custom && user.generation_custom_llm_id) {
+      setGenProviderValue(`custom:${user.generation_custom_llm_id}`);
+      const customLlm = providerInfo.custom_llms.find(
+        (c) => c.id === user.generation_custom_llm_id
+      );
+      setGenModel(user.preferred_llm_model || customLlm?.models?.[0] || "");
+    } else {
+      const p = user.preferred_llm_provider || providerInfo.default;
+      setGenProviderValue(`builtin:${p}`);
+      const pInfo = providerInfo.builtin.find((b) => b.id === p);
+      setGenModel(user.preferred_llm_model || pInfo?.default_model || "");
+    }
+
+    if (user.agent_use_custom && user.agent_custom_llm_id) {
+      setAgentProviderValue(`custom:${user.agent_custom_llm_id}`);
+      const customLlm = providerInfo.custom_llms.find(
+        (c) => c.id === user.agent_custom_llm_id
+      );
+      setAgentModel(user.agent_model || customLlm?.models?.[0] || "");
+    } else {
+      setAgentProviderValue("builtin:anthropic");
+      setAgentModel(providerInfo.agent_builtin?.model || "");
+    }
+
     form.setFieldsValue({
       agent_mode: user.agent_mode || "flexible",
       max_llm_iterations: user.max_llm_iterations || 10,
@@ -85,7 +132,124 @@ export default function AiSettings() {
       auto_audit_min_score: user.auto_audit_min_score || 60,
       ai_language: user.ai_language || null,
     });
-  }, [user, form]);
+  }, [user, providerInfo, form]);
+
+  const getModelsForProviderValue = useCallback(
+    (pv: string): string[] => {
+      const decoded = decodeProviderValue(pv);
+      if (decoded.kind === "builtin") {
+        return providerInfo?.builtin.find((p) => p.id === decoded.providerId)?.models || [];
+      }
+      const customLlm = providerInfo?.custom_llms.find((c) => c.id === decoded.customLlmId);
+      return customLlm?.models || [];
+    },
+    [providerInfo]
+  );
+
+  const getDefaultModelForProviderValue = useCallback(
+    (pv: string): string => {
+      const decoded = decodeProviderValue(pv);
+      if (decoded.kind === "builtin") {
+        return providerInfo?.builtin.find((p) => p.id === decoded.providerId)?.default_model || "";
+      }
+      const customLlm = providerInfo?.custom_llms.find((c) => c.id === decoded.customLlmId);
+      return customLlm?.models?.[0] || "";
+    },
+    [providerInfo]
+  );
+
+  const saveGenProviderModel = useCallback(
+    async (pv: string, model: string) => {
+      setGenSaving(true);
+      try {
+        const decoded = decodeProviderValue(pv);
+        if (decoded.kind === "builtin") {
+          await updateAiSettings({
+            preferred_llm_provider: decoded.providerId,
+            preferred_llm_model: model || null,
+            generation_use_custom: false,
+            generation_custom_llm_id: null,
+          });
+        } else {
+          await updateAiSettings({
+            generation_use_custom: true,
+            generation_custom_llm_id: decoded.customLlmId,
+            preferred_llm_model: model || null,
+          });
+        }
+        message.success(t("ai_settings_switch_success"));
+      } catch (e) {
+        message.error(String(e));
+      } finally {
+        setGenSaving(false);
+      }
+    },
+    [updateAiSettings, t]
+  );
+
+  const handleGenProviderChange = useCallback(
+    async (newPv: string) => {
+      setGenProviderValue(newPv);
+      const defaultModel = getDefaultModelForProviderValue(newPv);
+      setGenModel(defaultModel);
+      await saveGenProviderModel(newPv, defaultModel);
+    },
+    [getDefaultModelForProviderValue, saveGenProviderModel]
+  );
+
+  const handleGenModelChange = useCallback(
+    async (newModel: string) => {
+      setGenModel(newModel);
+      await saveGenProviderModel(genProviderValue, newModel);
+    },
+    [genProviderValue, saveGenProviderModel]
+  );
+
+  const saveAgentProviderModel = useCallback(
+    async (pv: string, model: string) => {
+      setAgentSaving(true);
+      try {
+        const decoded = decodeProviderValue(pv);
+        if (decoded.kind === "builtin") {
+          await updateAiSettings({
+            agent_use_custom: false,
+            agent_custom_llm_id: null,
+            agent_model: null,
+          });
+        } else {
+          await updateAiSettings({
+            agent_use_custom: true,
+            agent_custom_llm_id: decoded.customLlmId,
+            agent_model: model || null,
+          });
+        }
+        message.success(t("ai_settings_switch_success"));
+      } catch (e) {
+        message.error(String(e));
+      } finally {
+        setAgentSaving(false);
+      }
+    },
+    [updateAiSettings, t]
+  );
+
+  const handleAgentProviderChange = useCallback(
+    async (newPv: string) => {
+      setAgentProviderValue(newPv);
+      const defaultModel = getDefaultModelForProviderValue(newPv);
+      setAgentModel(defaultModel);
+      await saveAgentProviderModel(newPv, defaultModel);
+    },
+    [getDefaultModelForProviderValue, saveAgentProviderModel]
+  );
+
+  const handleAgentModelChange = useCallback(
+    async (newModel: string) => {
+      setAgentModel(newModel);
+      await saveAgentProviderModel(agentProviderValue, newModel);
+    },
+    [agentProviderValue, saveAgentProviderModel]
+  );
 
   const onFinish = async (values: {
     agent_mode: string;
@@ -119,81 +283,160 @@ export default function AiSettings() {
     }
   };
 
-  const bgColor = isDark ? "#181715" : "#f5f0e8";
-  const bgLinear = isDark
-    ? "linear-gradient(180deg, #1e1d1b 0%, #181715 35%)"
-    : "linear-gradient(180deg, #e6dfd8 0%, #f5f0e8 35%)";
-  const bgRadial = isDark
-    ? "none"
-    : "radial-gradient(ellipse 120% 80% at 50% -20%, #faf9f5 0%, transparent 55%)";
-  const headerBg = isDark ? "#1e1d1b" : "#faf9f5";
-  const headerBorder = isDark ? "#2a2926" : "#e6dfd8";
-  const textColor = isDark ? "#e7e5e1" : "#141413";
-  const cardBg = isDark ? "#1e1d1b" : "#faf9f5";
-  const secondaryTextColor = isDark ? "#a3a19b" : "#6c6a64";
+  const handleAddCustomLlm = async () => {
+    const values = await addForm.validateFields();
+    setAddSaving(true);
+    try {
+      await createCustomLLM({
+        provider: values.provider,
+        api_key: values.api_key.trim(),
+        base_url: values.base_url?.trim() || null,
+      });
+      setAddModalOpen(false);
+      addForm.resetFields();
+      const newData = await loadProviderInfo();
+      if (newData) {
+        await refreshUser();
+      }
+      message.success(t("ai_settings_custom_added"));
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      setAddSaving(false);
+    }
+  };
 
-  const innerCardBg = isDark
+  const handleEditCustomLlm = async () => {
+    if (!editingCustom) return;
+    const values = await editForm.validateFields();
+    setEditSaving(true);
+    try {
+      const payload: { provider?: string; api_key?: string; base_url?: string | null } = {};
+      if (values.provider) payload.provider = values.provider;
+      if (values.api_key && !isMasked(values.api_key)) {
+        payload.api_key = values.api_key.trim();
+      }
+      if (values.base_url !== undefined) {
+        payload.base_url = values.base_url?.trim() || null;
+      }
+      await updateCustomLLM(editingCustom.id, payload);
+      setEditModalOpen(false);
+      setEditingCustom(null);
+      editForm.resetFields();
+      await loadProviderInfo();
+      await refreshUser();
+      message.success(t("ai_settings_custom_updated"));
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDeleteCustomLlm = async (id: number) => {
+    try {
+      await deleteCustomLLM(id);
+      await loadProviderInfo();
+      await refreshUser();
+      message.success(t("ai_settings_custom_removed"));
+    } catch (e) {
+      message.error(String(e));
+    }
+  };
+
+  const openEditModal = (custom: CustomLlmInfo) => {
+    setEditingCustom(custom);
+    editForm.setFieldsValue({
+      provider: custom.provider,
+      api_key: custom.api_key || "",
+      base_url: custom.base_url || "",
+    });
+    setEditModalOpen(true);
+  };
+
+  const openAddModal = () => {
+    addForm.setFieldsValue({
+      provider: "openai",
+      api_key: "",
+      base_url: "",
+    });
+    setAddModalOpen(true);
+  };
+
+  const handleAddProviderChange = (provider: string) => {
+    const found = ALL_PROVIDERS.find((p) => p.value === provider);
+    if (found) {
+      addForm.setFieldsValue({ base_url: found.defaultUrl });
+    }
+  };
+
+  const handleEditProviderChange = (provider: string) => {
+    const found = ALL_PROVIDERS.find((p) => p.value === provider);
+    if (found) {
+      editForm.setFieldsValue({ base_url: found.defaultUrl });
+    }
+  };
+
+  const getAgentModeLabel = (mode: AgentMode) =>
+    t(
+      {
+        flexible: "ai_settings_flexible",
+        react: "ai_settings_react",
+        direct: "ai_settings_direct",
+      }[mode]
+    );
+  const getAgentModeDescription = (mode: AgentMode) =>
+    t(
+      {
+        flexible: "ai_settings_flexible_desc",
+        react: "ai_settings_react_desc",
+        direct: "ai_settings_direct_desc",
+      }[mode]
+    );
+
+  const bgColor = colors.bgColor;
+  const bgLinear = colors.bgLinear;
+  const bgRadial = colors.bgRadial;
+  const textColor = colors.textColor;
+  const cardBg = colors.cardBg;
+  const secondaryTextColor = colors.secondaryTextColor;
+  const innerCardBg = colors.isDark
     ? "linear-gradient(180deg, #1e1d1b 0%, #181715 100%)"
     : "linear-gradient(180deg, #faf9f5 0%, #f5f0e8 100%)";
+  const primaryColor = colors.primaryColor;
+  const summaryCardBg = colors.isDark
+    ? "linear-gradient(135deg, #2a2520 0%, #1e1d1b 100%)"
+    : "linear-gradient(135deg, #f5efe6 0%, #efe9de 100%)";
 
-  const primaryColor = "#cc785c";
+  const genDecoded = genProviderValue ? decodeProviderValue(genProviderValue) : null;
+  const genIsCustom = genDecoded?.kind === "custom";
+  const genCurrentModels = genProviderValue ? getModelsForProviderValue(genProviderValue) : [];
 
-  const languageMenuItems = [
-    {
-      key: "zh",
-      icon: <GlobalOutlined />,
-      label: isZh ? "✓ 中文" : "中文",
-      onClick: () => setLanguage("zh"),
-    },
-    {
-      key: "en",
-      icon: <GlobalOutlined />,
-      label: !isZh ? "✓ English" : "English",
-      onClick: () => setLanguage("en"),
-    },
-  ];
+  const genProviderLabel = genDecoded
+    ? genDecoded.kind === "builtin"
+      ? providerInfo?.builtin.find((p) => p.id === genDecoded.providerId)?.label || genDecoded.providerId
+      : (() => {
+          const cl = providerInfo?.custom_llms.find((c) => c.id === genDecoded.customLlmId);
+          return cl ? `${cl.provider_label}` : t("ai_settings_custom_tag");
+        })()
+    : "";
 
-  const userMenuItems = [
-    ...(user?.is_admin
-      ? [
-          {
-            key: "admin",
-            icon: <SafetyOutlined />,
-            label: t("nav_admin"),
-            onClick: () => nav("/admin/users"),
-          },
-        ]
-      : []),
-    {
-      key: "settings",
-      icon: <SettingOutlined />,
-      label: t("nav_ai_settings"),
-      disabled: true,
-    },
-    {
-      key: "usage",
-      icon: <BarChartOutlined />,
-      label: t("nav_usage"),
-      onClick: () => nav("/usage"),
-    },
-    {
-      key: "tasks",
-      icon: <HistoryOutlined />,
-      label: t("nav_background_tasks"),
-      onClick: () => nav("/tasks"),
-    },
-    {
-      key: "divider",
-      type: "divider" as const,
-    },
-    {
-      key: "logout",
-      icon: <LogoutOutlined />,
-      label: t("nav_logout"),
-      danger: true,
-      onClick: () => logout(),
-    },
-  ];
+  const agentDecoded = agentProviderValue ? decodeProviderValue(agentProviderValue) : null;
+  const agentIsCustom = agentDecoded?.kind === "custom";
+  const agentCurrentModels = agentProviderValue ? getModelsForProviderValue(agentProviderValue) : [];
+
+  const agentProviderLabel = agentDecoded
+    ? agentDecoded.kind === "builtin"
+      ? providerInfo?.agent_builtin
+        ? t("ai_settings_agent_builtin_proxy")
+        : "Anthropic"
+      : (() => {
+          const cl = providerInfo?.custom_llms.find((c) => c.id === agentDecoded.customLlmId);
+          return cl ? cl.provider_label : t("ai_settings_custom_tag");
+        })()
+    : "";
+
+  const agentCurrentModel = agentModel || providerInfo?.agent_builtin?.model || "-";
 
   return (
     <Layout
@@ -204,46 +447,24 @@ export default function AiSettings() {
         transition: "background-color 0.3s ease",
       }}
     >
-      <Header
-        style={{
-          padding: "0 2rem",
-          background: headerBg,
-          borderBottom: `1px solid ${headerBorder}`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          height: 72,
-          transition: "background-color 0.3s ease, border-color 0.3s ease",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.75rem",
-          }}
-        >
-          <SettingOutlined
-            style={{
-              fontSize: "1.75rem",
-              color: primaryColor,
-            }}
-          />
-          <Title
-            level={3}
-            style={{
-              margin: 0,
-              fontFamily: '"Noto Serif SC", "DM Serif Display", Georgia, serif',
-              color: textColor,
-              fontSize: "1.35rem",
-              transition: "color 0.3s ease",
-            }}
-          >
-            {t("ai_settings_title")}
-          </Title>
-        </div>
-
-        <Space size="middle">
+      <AppHeader
+        leftContent={
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+            <SettingOutlined style={{ fontSize: "1.75rem", color: primaryColor }} />
+            <Title
+              level={3}
+              style={{
+                margin: 0,
+                fontFamily: '"Noto Serif SC", "DM Serif Display", Georgia, serif',
+                color: textColor,
+                fontSize: "1.35rem",
+              }}
+            >
+              {t("ai_settings_title")}
+            </Title>
+          </div>
+        }
+        extraActions={
           <Button
             icon={<ArrowLeftOutlined />}
             onClick={() => goBackSmart()}
@@ -252,105 +473,19 @@ export default function AiSettings() {
           >
             {t("nav_back")}
           </Button>
+        }
+        disabledMenuItem="settings"
+      />
 
-          <Dropdown menu={{ items: languageMenuItems }} placement="bottomRight">
-            <Button
-              type="text"
-              icon={<GlobalOutlined />}
-              size="large"
-              style={{
-                color: textColor,
-                transition: "color 0.3s ease",
-              }}
-            >
-              {isZh ? "中文" : "EN"}
-            </Button>
-          </Dropdown>
-
-          <Button
-            type="text"
-            icon={theme === "dark" ? <MoonOutlined /> : <SunOutlined />}
-            size="large"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            aria-label={theme === "dark" ? t("theme_light") : t("theme_dark")}
-            style={{
-              color: textColor,
-              transition: "color 0.3s ease",
-            }}
-          />
-
-          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                cursor: "pointer",
-                padding: "0.4rem 0.75rem",
-                borderRadius: 8,
-                transition: "background 0.2s",
-              }}
-            >
-              <Avatar
-                size={36}
-                icon={<UserOutlined />}
-                style={{
-                  background: primaryColor,
-                  transition: "background-color 0.3s ease",
-                }}
-              >
-                {user?.display_name?.charAt(0) || user?.email?.charAt(0)}
-              </Avatar>
-              <div style={{ lineHeight: 1.2 }}>
-                <Text
-                  strong
-                  style={{
-                    display: "block",
-                    color: textColor,
-                    fontSize: "0.9rem",
-                    transition: "color 0.3s ease",
-                  }}
-                >
-                  {user?.display_name || user?.email}
-                </Text>
-                {user?.display_name && (
-                  <Text
-                    type="secondary"
-                    style={{
-                      display: "block",
-                      fontSize: "0.75rem",
-                      color: textColor,
-                      opacity: 0.6,
-                      transition: "color 0.3s ease",
-                    }}
-                  >
-                    {user.email}
-                  </Text>
-                )}
-              </div>
-            </div>
-          </Dropdown>
-        </Space>
-      </Header>
-
-      <Content
-        style={{
-          padding: "2rem",
-          maxWidth: 900,
-          margin: "0 auto",
-          width: "100%",
-        }}
-      >
+      <Content style={{ padding: "2rem", maxWidth: 900, margin: "0 auto", width: "100%" }}>
         {successMsg && (
           <Alert
             message={t("ai_settings_save_success")}
-            description={successMsg}
             type="success"
             showIcon
             style={{ marginBottom: "1.5rem" }}
           />
         )}
-
         {errorMsg && (
           <Alert
             message={t("ai_settings_save_failed")}
@@ -361,21 +496,155 @@ export default function AiSettings() {
           />
         )}
 
+        {/* ===== Current AI Configuration Summary ===== */}
+        <Card
+          style={{
+            borderRadius: 16,
+            border: `1px solid ${colors.isDark ? "#3a3530" : "#e6dfd8"}`,
+            background: summaryCardBg,
+            marginBottom: "1.5rem",
+            boxShadow: colors.isDark
+              ? "0 2px 8px rgba(0,0,0,0.3)"
+              : "0 2px 8px rgba(28,25,23,0.08)",
+          }}
+          bodyStyle={{ padding: "1.25rem 1.5rem" }}
+        >
+          <div
+            style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}
+          >
+            <CheckOutlined style={{ color: primaryColor, fontSize: "1.1rem" }} />
+            <Text strong style={{ color: textColor, fontSize: "1rem" }}>
+              {t("ai_settings_current_config")}
+            </Text>
+          </div>
+          <Row gutter={[24, 12]}>
+            <Col xs={24} md={12}>
+              <div
+                style={{
+                  padding: "0.75rem 1rem",
+                  borderRadius: 8,
+                  background: colors.isDark
+                    ? "rgba(255,255,255,0.04)"
+                    : "rgba(255,255,255,0.6)",
+                }}
+              >
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}
+                >
+                  <ThunderboltOutlined style={{ color: primaryColor, fontSize: "0.9rem" }} />
+                  <Text
+                    type="secondary"
+                    style={{ color: secondaryTextColor, fontSize: "0.8rem" }}
+                  >
+                    {t("ai_settings_agent_ai")}
+                  </Text>
+                  {agentIsCustom ? (
+                    <Tag
+                      color="orange"
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: "0.7rem",
+                        lineHeight: "1.4",
+                        padding: "0 4px",
+                      }}
+                    >
+                      {t("ai_settings_custom_tag")}
+                    </Tag>
+                  ) : (
+                    <Tag
+                      color="blue"
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: "0.7rem",
+                        lineHeight: "1.4",
+                        padding: "0 4px",
+                      }}
+                    >
+                      {t("ai_settings_builtin_tag")}
+                    </Tag>
+                  )}
+                </div>
+                <Text strong style={{ color: textColor, fontSize: "1rem" }}>
+                  {agentProviderLabel}
+                </Text>
+                <Text
+                  style={{ color: secondaryTextColor, fontSize: "0.85rem", marginLeft: 8 }}
+                >
+                  {agentCurrentModel}
+                </Text>
+              </div>
+            </Col>
+            <Col xs={24} md={12}>
+              <div
+                style={{
+                  padding: "0.75rem 1rem",
+                  borderRadius: 8,
+                  background: colors.isDark
+                    ? "rgba(255,255,255,0.04)"
+                    : "rgba(255,255,255,0.6)",
+                }}
+              >
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}
+                >
+                  <RobotOutlined style={{ color: primaryColor, fontSize: "0.9rem" }} />
+                  <Text
+                    type="secondary"
+                    style={{ color: secondaryTextColor, fontSize: "0.8rem" }}
+                  >
+                    {t("ai_settings_generation_ai")}
+                  </Text>
+                  {genIsCustom ? (
+                    <Tag
+                      color="orange"
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: "0.7rem",
+                        lineHeight: "1.4",
+                        padding: "0 4px",
+                      }}
+                    >
+                      {t("ai_settings_custom_tag")}
+                    </Tag>
+                  ) : (
+                    <Tag
+                      color="blue"
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: "0.7rem",
+                        lineHeight: "1.4",
+                        padding: "0 4px",
+                      }}
+                    >
+                      {t("ai_settings_builtin_tag")}
+                    </Tag>
+                  )}
+                </div>
+                <Text strong style={{ color: textColor, fontSize: "1rem" }}>
+                  {genProviderLabel}
+                </Text>
+                <Text
+                  style={{ color: secondaryTextColor, fontSize: "0.85rem", marginLeft: 8 }}
+                >
+                  {genModel || "-"}
+                </Text>
+              </div>
+            </Col>
+          </Row>
+        </Card>
+
         <Card
           style={{
             borderRadius: 16,
             border: "none",
-            boxShadow: isDark
-              ? "0 4px 6px rgba(0, 0, 0, 0.3)"
-              : "0 4px 6px rgba(28, 25, 23, 0.06)",
+            boxShadow: colors.isDark
+              ? "0 4px 6px rgba(0,0,0,0.3)"
+              : "0 4px 6px rgba(28,25,23,0.06)",
             background: cardBg,
-            transition: "background-color 0.3s ease, box-shadow 0.3s ease",
           }}
           title={
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-              <SettingOutlined
-                style={{ color: primaryColor, fontSize: "1.25rem" }}
-              />
+              <SettingOutlined style={{ color: primaryColor, fontSize: "1.25rem" }} />
               <Title
                 level={4}
                 style={{
@@ -394,33 +663,408 @@ export default function AiSettings() {
             </Text>
           }
         >
-          <Form
-            form={form}
-            name="aiSettings"
-            onFinish={onFinish}
-            layout="vertical"
-            initialValues={{
-              agent_mode: "flexible",
-              max_llm_iterations: 10,
-              max_tokens_per_task: 50000,
-              enable_auto_audit: true,
-              preview_before_save: true,
-              auto_audit_min_score: 60,
-            }}
-          >
+          <Form form={form} name="aiSettings" onFinish={onFinish} layout="vertical">
+            {/* ===== AI 助手 (Agent) ===== */}
+            <Card
+              type="inner"
+              title={
+                <Space>
+                  <ThunderboltOutlined style={{ color: primaryColor }} />
+                  <span style={{ color: textColor }}>{t("ai_settings_agent_ai")}</span>
+                </Space>
+              }
+              style={{ marginBottom: "1.5rem", background: innerCardBg, borderRadius: 12 }}
+            >
+              <Paragraph style={{ color: secondaryTextColor, marginBottom: "1rem" }}>
+                {t("ai_settings_agent_ai_desc")}
+              </Paragraph>
+              <Row gutter={24}>
+                <Col xs={24} md={12}>
+                  <div style={{ marginBottom: 8 }}>
+                    <Text strong style={{ color: textColor }}>
+                      {t("ai_settings_provider")}
+                    </Text>
+                  </div>
+                  <Spin spinning={agentSaving} size="small">
+                    <Select
+                      size="large"
+                      style={{ width: "100%" }}
+                      value={agentProviderValue || undefined}
+                      onChange={handleAgentProviderChange}
+                      disabled={agentSaving}
+                      suffixIcon={
+                        agentSaving ? (
+                          <Spin size="small" />
+                        ) : (
+                          <SwapOutlined style={{ color: secondaryTextColor }} />
+                        )
+                      }
+                    >
+                      {providerInfo?.agent_builtin && (
+                        <Option value="builtin:anthropic">
+                          <Space>
+                            {t("ai_settings_agent_builtin_proxy")}
+                            <Tag
+                              color="blue"
+                              style={{
+                                fontSize: "0.65rem",
+                                lineHeight: "1.3",
+                                padding: "0 3px",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {t("ai_settings_builtin_tag")}
+                            </Tag>
+                          </Space>
+                        </Option>
+                      )}
+                      {providerInfo?.custom_llms.map((cl) => (
+                        <Option key={`custom:${cl.id}`} value={`custom:${cl.id}`}>
+                          <Space>
+                            {cl.provider_label}
+                            <Tag
+                              color="orange"
+                              style={{
+                                fontSize: "0.65rem",
+                                lineHeight: "1.3",
+                                padding: "0 3px",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {t("ai_settings_custom_tag")}
+                            </Tag>
+                          </Space>
+                        </Option>
+                      ))}
+                    </Select>
+                  </Spin>
+                </Col>
+                <Col xs={24} md={12}>
+                  <div style={{ marginBottom: 8 }}>
+                    <Text strong style={{ color: textColor }}>
+                      {t("ai_settings_model")}
+                    </Text>
+                  </div>
+                  <Spin spinning={agentSaving} size="small">
+                    {agentIsCustom && agentCurrentModels.length > 0 ? (
+                      <Select
+                        size="large"
+                        style={{ width: "100%" }}
+                        value={agentModel || undefined}
+                        onChange={handleAgentModelChange}
+                        disabled={agentSaving}
+                        placeholder={t("ai_settings_model_placeholder")}
+                      >
+                        {agentCurrentModels.map((m) => (
+                          <Option key={m} value={m}>
+                            {m}
+                          </Option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <Input
+                        size="large"
+                        style={{ height: 44 }}
+                        value={agentCurrentModel}
+                        readOnly
+                        disabled
+                      />
+                    )}
+                  </Spin>
+                </Col>
+              </Row>
+              <div style={{ marginTop: "0.75rem" }}>
+                <Text
+                  type="secondary"
+                  style={{ color: secondaryTextColor, fontSize: "0.8rem" }}
+                >
+                  {t("ai_settings_switch_hint")}
+                </Text>
+              </div>
+            </Card>
+
+            {/* ===== 正文生成 ===== */}
             <Card
               type="inner"
               title={
                 <Space>
                   <RobotOutlined style={{ color: primaryColor }} />
-                  <span style={{ color: textColor }}>{t("ai_settings_agent_mode")}</span>
+                  <span style={{ color: textColor }}>{t("ai_settings_generation_ai")}</span>
                 </Space>
               }
-              style={{
-                marginBottom: "1.5rem",
-                background: innerCardBg,
-                borderRadius: 12,
-              }}
+              style={{ marginBottom: "1.5rem", background: innerCardBg, borderRadius: 12 }}
+            >
+              <Paragraph style={{ color: secondaryTextColor, marginBottom: "1rem" }}>
+                {t("ai_settings_generation_ai_desc")}
+              </Paragraph>
+              <Row gutter={24}>
+                <Col xs={24} md={12}>
+                  <div style={{ marginBottom: 8 }}>
+                    <Text strong style={{ color: textColor }}>
+                      {t("ai_settings_provider")}
+                    </Text>
+                  </div>
+                  <Spin spinning={genSaving} size="small">
+                    <Select
+                      size="large"
+                      style={{ width: "100%" }}
+                      value={genProviderValue || undefined}
+                      onChange={handleGenProviderChange}
+                      disabled={genSaving}
+                      suffixIcon={
+                        genSaving ? (
+                          <Spin size="small" />
+                        ) : (
+                          <SwapOutlined style={{ color: secondaryTextColor }} />
+                        )
+                      }
+                    >
+                      {providerInfo?.builtin.map((p) => (
+                        <Option key={`builtin:${p.id}`} value={`builtin:${p.id}`}>
+                          <Space>
+                            {p.label}
+                            <Tag
+                              color="blue"
+                              style={{
+                                fontSize: "0.65rem",
+                                lineHeight: "1.3",
+                                padding: "0 3px",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {t("ai_settings_builtin_tag")}
+                            </Tag>
+                          </Space>
+                        </Option>
+                      ))}
+                      {providerInfo?.custom_llms.map((cl) => (
+                        <Option key={`custom:${cl.id}`} value={`custom:${cl.id}`}>
+                          <Space>
+                            {cl.provider_label}
+                            <Tag
+                              color="orange"
+                              style={{
+                                fontSize: "0.65rem",
+                                lineHeight: "1.3",
+                                padding: "0 3px",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {t("ai_settings_custom_tag")}
+                            </Tag>
+                          </Space>
+                        </Option>
+                      ))}
+                    </Select>
+                  </Spin>
+                </Col>
+                <Col xs={24} md={12}>
+                  <div style={{ marginBottom: 8 }}>
+                    <Text strong style={{ color: textColor }}>
+                      {t("ai_settings_model")}
+                    </Text>
+                  </div>
+                  <Spin spinning={genSaving} size="small">
+                    {genCurrentModels.length > 0 ? (
+                      <Select
+                        size="large"
+                        style={{ width: "100%" }}
+                        value={genModel || undefined}
+                        onChange={handleGenModelChange}
+                        disabled={genSaving}
+                        placeholder={t("ai_settings_model_placeholder")}
+                        suffixIcon={
+                          genSaving ? (
+                            <Spin size="small" />
+                          ) : (
+                            <SwapOutlined style={{ color: secondaryTextColor }} />
+                          )
+                        }
+                      >
+                        {genCurrentModels.map((m) => (
+                          <Option key={m} value={m}>
+                            {m}
+                          </Option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <Input
+                        size="large"
+                        style={{ height: 44 }}
+                        value={genModel}
+                        readOnly
+                        disabled
+                      />
+                    )}
+                  </Spin>
+                </Col>
+              </Row>
+              <div style={{ marginTop: "0.75rem" }}>
+                <Text
+                  type="secondary"
+                  style={{ color: secondaryTextColor, fontSize: "0.8rem" }}
+                >
+                  {t("ai_settings_switch_hint")}
+                </Text>
+              </div>
+            </Card>
+
+            {/* ===== Custom LLM Management ===== */}
+            <Card
+              type="inner"
+              title={
+                <Space>
+                  <LinkOutlined style={{ color: primaryColor }} />
+                  <span style={{ color: textColor }}>
+                    {t("ai_settings_custom_llm_management")}
+                  </span>
+                </Space>
+              }
+              style={{ marginBottom: "1.5rem", background: innerCardBg, borderRadius: 12 }}
+            >
+              <Paragraph style={{ color: secondaryTextColor, marginBottom: "1rem" }}>
+                {t("ai_settings_custom_llm_management_desc")}
+              </Paragraph>
+              <Button
+                icon={<PlusOutlined />}
+                onClick={openAddModal}
+                style={{ marginBottom: "1rem" }}
+              >
+                {t("ai_settings_add_custom")}
+              </Button>
+              {providerInfo?.custom_llms.length === 0 && (
+                <div
+                  style={{
+                    padding: "1.5rem",
+                    textAlign: "center",
+                    borderRadius: 8,
+                    background: colors.isDark
+                      ? "rgba(255,255,255,0.03)"
+                      : "rgba(0,0,0,0.02)",
+                  }}
+                >
+                  <Text style={{ color: secondaryTextColor }}>
+                    {t("ai_settings_no_custom_llms")}
+                  </Text>
+                </div>
+              )}
+              {providerInfo?.custom_llms.map((cl) => {
+                const isGenSelected =
+                  user?.generation_use_custom &&
+                  user.generation_custom_llm_id === cl.id;
+                const isAgentSelected =
+                  user?.agent_use_custom && user.agent_custom_llm_id === cl.id;
+                return (
+                  <div
+                    key={cl.id}
+                    style={{
+                      padding: "0.75rem 1rem",
+                      borderRadius: 8,
+                      border: `1px solid ${colors.isDark ? "#3a3530" : "#e6dfd8"}`,
+                      marginBottom: "0.5rem",
+                      background: colors.isDark
+                        ? "rgba(255,255,255,0.03)"
+                        : "rgba(255,255,255,0.5)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Text strong style={{ color: textColor }}>
+                          {cl.provider_label}
+                        </Text>
+                        <Tag color="orange" style={{ fontSize: "0.7rem", lineHeight: "1.4", padding: "0 4px" }}>
+                          {t("ai_settings_custom_tag")}
+                        </Tag>
+                        {isGenSelected && (
+                          <Tag
+                            color="green"
+                            style={{ fontSize: "0.7rem", lineHeight: "1.4", padding: "0 4px" }}
+                          >
+                            {t("ai_settings_generation_ai")}
+                          </Tag>
+                        )}
+                        {isAgentSelected && (
+                          <Tag
+                            color="purple"
+                            style={{ fontSize: "0.7rem", lineHeight: "1.4", padding: "0 4px" }}
+                          >
+                            {t("ai_settings_agent_ai")}
+                          </Tag>
+                        )}
+                      </div>
+                      <Space size={4}>
+                        <Button
+                          size="small"
+                          icon={<EditOutlined />}
+                          onClick={() => openEditModal(cl)}
+                        >
+                          {t("ai_settings_edit_custom")}
+                        </Button>
+                        <Popconfirm
+                          title={t("ai_settings_delete_custom_confirm")}
+                          onConfirm={() => handleDeleteCustomLlm(cl.id)}
+                          okText={t("ai_settings_confirm_delete")}
+                          cancelText={t("ai_settings_cancel")}
+                        >
+                          <Button size="small" icon={<DeleteOutlined />} danger>
+                            {t("ai_settings_remove_custom")}
+                          </Button>
+                        </Popconfirm>
+                      </Space>
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      <Text
+                        type="secondary"
+                        style={{ color: secondaryTextColor, fontSize: "0.8rem" }}
+                      >
+                        API Key: {cl.api_key || "-"}
+                      </Text>
+                      {cl.base_url && (
+                        <Text
+                          type="secondary"
+                          style={{
+                            color: secondaryTextColor,
+                            fontSize: "0.8rem",
+                            marginLeft: 12,
+                          }}
+                        >
+                          URL: {cl.base_url}
+                        </Text>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 2 }}>
+                      <Text
+                        type="secondary"
+                        style={{ color: secondaryTextColor, fontSize: "0.75rem" }}
+                      >
+                        {t("ai_settings_available_models")}: {cl.models.join(", ") || "-"}
+                      </Text>
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+
+            {/* ===== Agent Mode ===== */}
+            <Card
+              type="inner"
+              title={
+                <Space>
+                  <RobotOutlined style={{ color: primaryColor }} />
+                  <span style={{ color: textColor }}>
+                    {t("ai_settings_agent_mode")}
+                  </span>
+                </Space>
+              }
+              style={{ marginBottom: "1.5rem", background: innerCardBg, borderRadius: 12 }}
             >
               <Form.Item
                 name="agent_mode"
@@ -437,7 +1081,10 @@ export default function AiSettings() {
                         <Text strong style={{ color: textColor }}>
                           {getAgentModeLabel(mode)}
                         </Text>
-                        <Text type="secondary" style={{ fontSize: "0.8rem", color: secondaryTextColor }}>
+                        <Text
+                          type="secondary"
+                          style={{ fontSize: "0.8rem", color: secondaryTextColor }}
+                        >
                           {getAgentModeDescription(mode)}
                         </Text>
                       </Space>
@@ -445,7 +1092,6 @@ export default function AiSettings() {
                   ))}
                 </Select>
               </Form.Item>
-
               <Alert
                 message={t("ai_settings_mode_note_title")}
                 description={
@@ -460,19 +1106,18 @@ export default function AiSettings() {
               />
             </Card>
 
+            {/* ===== Resource Limits ===== */}
             <Card
               type="inner"
               title={
                 <Space>
                   <GoldOutlined style={{ color: primaryColor }} />
-                  <span style={{ color: textColor }}>{t("ai_settings_resource_limit")}</span>
+                  <span style={{ color: textColor }}>
+                    {t("ai_settings_resource_limit")}
+                  </span>
                 </Space>
               }
-              style={{
-                marginBottom: "1.5rem",
-                background: innerCardBg,
-                borderRadius: 12,
-              }}
+              style={{ marginBottom: "1.5rem", background: innerCardBg, borderRadius: 12 }}
             >
               <Row gutter={24}>
                 <Col xs={24} md={12}>
@@ -483,7 +1128,7 @@ export default function AiSettings() {
                         {t("ai_settings_max_iterations")}
                       </Text>
                     }
-                    rules={[{ type: "number", min: 1, max: 50, message: t("validation_number_range").replace("{min}", "1").replace("{max}", "50") }]}
+                    rules={[{ type: "number", min: 1, max: 50 }]}
                   >
                     <InputNumber
                       min={1}
@@ -493,9 +1138,6 @@ export default function AiSettings() {
                       addonAfter={t("common_rounds")}
                     />
                   </Form.Item>
-                  <Text type="secondary" style={{ fontSize: "0.8rem", color: secondaryTextColor }}>
-                    {t("ai_settings_max_iterations_desc")}
-                  </Text>
                 </Col>
                 <Col xs={24} md={12}>
                   <Form.Item
@@ -505,7 +1147,7 @@ export default function AiSettings() {
                         {t("ai_settings_max_tokens")}
                       </Text>
                     }
-                    rules={[{ type: "number", min: 1000, max: 500000, message: t("validation_number_range").replace("{min}", "1000").replace("{max}", "500000") }]}
+                    rules={[{ type: "number", min: 1000, max: 500000 }]}
                   >
                     <InputNumber
                       min={1000}
@@ -516,26 +1158,22 @@ export default function AiSettings() {
                       step={1000}
                     />
                   </Form.Item>
-                  <Text type="secondary" style={{ fontSize: "0.8rem", color: secondaryTextColor }}>
-                    {t("ai_settings_max_tokens_desc")}
-                  </Text>
                 </Col>
               </Row>
             </Card>
 
+            {/* ===== Quality & Safety ===== */}
             <Card
               type="inner"
               title={
                 <Space>
                   <SafetyOutlined style={{ color: primaryColor }} />
-                  <span style={{ color: textColor }}>{t("ai_settings_quality_safety")}</span>
+                  <span style={{ color: textColor }}>
+                    {t("ai_settings_quality_safety")}
+                  </span>
                 </Space>
               }
-              style={{
-                marginBottom: "1.5rem",
-                background: innerCardBg,
-                borderRadius: 12,
-              }}
+              style={{ marginBottom: "1.5rem", background: innerCardBg, borderRadius: 12 }}
             >
               <Row gutter={24}>
                 <Col xs={24} md={12}>
@@ -553,9 +1191,6 @@ export default function AiSettings() {
                       unCheckedChildren={t("ai_settings_switch_off")}
                     />
                   </Form.Item>
-                  <Text type="secondary" style={{ fontSize: "0.8rem", color: secondaryTextColor }}>
-                    {t("ai_settings_auto_audit_desc")}
-                  </Text>
                 </Col>
                 <Col xs={24} md={12}>
                   <Form.Item
@@ -565,8 +1200,7 @@ export default function AiSettings() {
                         {t("ai_settings_auto_audit_min_score")}
                       </Text>
                     }
-                    dependencies={["enable_auto_audit"]}
-                    rules={[{ type: "number", min: 0, max: 100, message: t("validation_number_range").replace("{min}", "0").replace("{max}", "100") }]}
+                    rules={[{ type: "number", min: 0, max: 100 }]}
                   >
                     <InputNumber
                       min={0}
@@ -577,26 +1211,22 @@ export default function AiSettings() {
                       disabled={!form.getFieldValue("enable_auto_audit")}
                     />
                   </Form.Item>
-                  <Text type="secondary" style={{ fontSize: "0.8rem", color: secondaryTextColor }}>
-                    {t("ai_settings_auto_audit_min_score_desc")}
-                  </Text>
                 </Col>
               </Row>
             </Card>
 
+            {/* ===== AI Language ===== */}
             <Card
               type="inner"
               title={
                 <Space>
                   <GlobalOutlined style={{ color: primaryColor }} />
-                  <span style={{ color: textColor }}>{t("ai_settings_ai_language")}</span>
+                  <span style={{ color: textColor }}>
+                    {t("ai_settings_ai_language")}
+                  </span>
                 </Space>
               }
-              style={{
-                marginBottom: "1.5rem",
-                background: innerCardBg,
-                borderRadius: 12,
-              }}
+              style={{ marginBottom: "1.5rem", background: innerCardBg, borderRadius: 12 }}
             >
               <Form.Item
                 name="ai_language"
@@ -608,46 +1238,36 @@ export default function AiSettings() {
               >
                 <Select size="large" style={{ width: "100%" }}>
                   <Option value={null}>
-                    <Space>
-                      <Text strong style={{ color: textColor }}>
-                        {t("ai_settings_ai_language_follow_ui")}
-                      </Text>
-                    </Space>
+                    <Text strong style={{ color: textColor }}>
+                      {t("ai_settings_ai_language_follow_ui")}
+                    </Text>
                   </Option>
                   <Option value="zh">
-                    <Space>
-                      <Text strong style={{ color: textColor }}>
-                        中文
-                      </Text>
-                    </Space>
+                    <Text strong style={{ color: textColor }}>
+                      中文
+                    </Text>
                   </Option>
                   <Option value="en">
-                    <Space>
-                      <Text strong style={{ color: textColor }}>
-                        English
-                      </Text>
-                    </Space>
+                    <Text strong style={{ color: textColor }}>
+                      English
+                    </Text>
                   </Option>
                 </Select>
               </Form.Item>
-              <Text type="secondary" style={{ fontSize: "0.8rem", color: secondaryTextColor }}>
-                {t("ai_settings_ai_language_desc")}
-              </Text>
             </Card>
 
+            {/* ===== Preview ===== */}
             <Card
               type="inner"
               title={
                 <Space>
                   <EyeOutlined style={{ color: primaryColor }} />
-                  <span style={{ color: textColor }}>{t("ai_settings_preview_confirm")}</span>
+                  <span style={{ color: textColor }}>
+                    {t("ai_settings_preview_confirm")}
+                  </span>
                 </Space>
               }
-              style={{
-                marginBottom: "1.5rem",
-                background: innerCardBg,
-                borderRadius: 12,
-              }}
+              style={{ marginBottom: "1.5rem", background: innerCardBg, borderRadius: 12 }}
             >
               <Form.Item
                 name="preview_before_save"
@@ -697,6 +1317,131 @@ export default function AiSettings() {
           </Form>
         </Card>
       </Content>
+
+      {/* Add Custom LLM Modal */}
+      <Modal
+        title={t("ai_settings_add_custom_llm_title")}
+        open={addModalOpen}
+        onOk={handleAddCustomLlm}
+        onCancel={() => setAddModalOpen(false)}
+        okText={t("ai_settings_save_button")}
+        confirmLoading={addSaving}
+        destroyOnClose
+        width={520}
+      >
+        <Form form={addForm} layout="vertical">
+          <Form.Item
+            name="provider"
+            label={t("ai_settings_provider")}
+            rules={[{ required: true, message: t("ai_settings_provider_required") }]}
+          >
+            <Select
+              size="large"
+              style={{ width: "100%" }}
+              onChange={handleAddProviderChange}
+            >
+              {ALL_PROVIDERS.map((p) => (
+                <Option key={p.value} value={p.value}>
+                  {p.label}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="api_key"
+            label={t("ai_settings_api_key")}
+            rules={[{ required: true, message: t("ai_settings_api_key_required") }]}
+          >
+            <Password
+              placeholder={t("ai_settings_generation_api_key_placeholder")}
+              size="large"
+              style={{ height: 44 }}
+              visibilityToggle
+            />
+          </Form.Item>
+          <Form.Item
+            name="base_url"
+            label={
+              <Space>
+                <span>{t("ai_settings_base_url")}</span>
+                <Tooltip title={t("ai_settings_base_url_tooltip")}>
+                  <QuestionCircleOutlined style={{ cursor: "help" }} />
+                </Tooltip>
+              </Space>
+            }
+          >
+            <Input
+              placeholder="https://api.openai.com/v1"
+              size="large"
+              style={{ height: 44 }}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Edit Custom LLM Modal */}
+      <Modal
+        title={t("ai_settings_edit_custom_llm_title")}
+        open={editModalOpen}
+        onOk={handleEditCustomLlm}
+        onCancel={() => {
+          setEditModalOpen(false);
+          setEditingCustom(null);
+        }}
+        okText={t("ai_settings_save_button")}
+        confirmLoading={editSaving}
+        destroyOnClose
+        width={520}
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item
+            name="provider"
+            label={t("ai_settings_provider")}
+            rules={[{ required: true, message: t("ai_settings_provider_required") }]}
+          >
+            <Select
+              size="large"
+              style={{ width: "100%" }}
+              onChange={handleEditProviderChange}
+            >
+              {ALL_PROVIDERS.map((p) => (
+                <Option key={p.value} value={p.value}>
+                  {p.label}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="api_key"
+            label={t("ai_settings_api_key")}
+            rules={[{ required: true, message: t("ai_settings_api_key_required") }]}
+          >
+            <Password
+              placeholder={t("ai_settings_generation_api_key_placeholder")}
+              size="large"
+              style={{ height: 44 }}
+              visibilityToggle
+            />
+          </Form.Item>
+          <Form.Item
+            name="base_url"
+            label={
+              <Space>
+                <span>{t("ai_settings_base_url")}</span>
+                <Tooltip title={t("ai_settings_base_url_tooltip")}>
+                  <QuestionCircleOutlined style={{ cursor: "help" }} />
+                </Tooltip>
+              </Space>
+            }
+          >
+            <Input
+              placeholder="https://api.openai.com/v1"
+              size="large"
+              style={{ height: 44 }}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Layout>
   );
 }
