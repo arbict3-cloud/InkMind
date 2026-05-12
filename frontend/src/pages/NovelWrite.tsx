@@ -1323,24 +1323,26 @@ export default function NovelWrite() {
                     />
                   </div>
                   <div className="write-editor-subtitle-row">
-                    <button
-                      type="button"
-                      className="write-summary-toggle"
-                      onClick={() => setSummaryOpen((v) => !v)}
-                      aria-expanded={summaryOpen}
-                      aria-label={summaryOpen ? t("write_summary_collapse") : t("write_summary_expand")}
-                    >
-                      <svg className={`write-summary-toggle__chevron${summaryOpen ? " is-open" : ""}`} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5l3 3 3-3" /></svg>
-                      <span className="write-summary-toggle__label">{t("write_chapter_summary")}</span>
-                    </button>
-                    <span className={`write-save-status write-save-status--${saveStatus}`}>
-                      {saveStatus === "saving" && <span className="write-save-dot write-save-dot--saving" aria-hidden />}
-                      {saveStatus === "saved" && <span className="write-save-dot write-save-dot--saved" aria-hidden />}
-                      {saveStatus === "unsaved" && <span className="write-save-dot write-save-dot--unsaved" aria-hidden />}
-                      {saveStatus === "saving" ? t("write_saving") : saveStatus === "saved" ? t("write_saved") : t("write_save_unsaved")}
-                    </span>
+                    <div className="write-chapter-meta">
+                      <button
+                        type="button"
+                        className="write-summary-toggle"
+                        onClick={() => setSummaryOpen((v) => !v)}
+                        aria-expanded={summaryOpen}
+                        aria-label={summaryOpen ? t("write_summary_collapse") : t("write_summary_expand")}
+                      >
+                        <svg className={`write-summary-toggle__chevron${summaryOpen ? " is-open" : ""}`} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5l3 3 3-3" /></svg>
+                        <span className="write-summary-toggle__label">{t("write_chapter_summary")}</span>
+                      </button>
+                      <span className={`write-save-status write-save-status--${saveStatus}`}>
+                        {saveStatus === "saving" && <span className="write-save-dot write-save-dot--saving" aria-hidden />}
+                        {saveStatus === "saved" && <span className="write-save-dot write-save-dot--saved" aria-hidden />}
+                        {saveStatus === "unsaved" && <span className="write-save-dot write-save-dot--unsaved" aria-hidden />}
+                        {saveStatus === "saving" ? t("write_saving") : saveStatus === "saved" ? t("write_saved") : t("write_save_unsaved")}
+                      </span>
+                    </div>
                     {!focusMode ? (
-                      <div className="write-chapter-actions" aria-label={t("write_chapter_actions")}>
+                      <div className="write-chapter-actions" role="group" aria-label={t("write_chapter_actions")}>
                         <button
                           type="button"
                           className="write-chapter-action"
