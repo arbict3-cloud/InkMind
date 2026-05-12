@@ -16,6 +16,22 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./inkmind.db"
 
     default_llm_provider: str = "qwen"
+
+    LLM_PROVIDER_MODELS: dict[str, list[str]] = {
+        "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        "qwen": ["qwen3-max", "qwen3.6-plus", "qwen3.6-max-preview", "qwen3.6-flash"],
+        "kimi": ["kimi-k2.6", "kimi-k2.5", "moonshot-v1-32k", "moonshot-v1-128k"],
+        "glm": ["GLM-5.1", "GLM-4.7-FlashX"],
+        "minimax": ["MiniMax-M2.7", "MiniMax-M2.5"],
+        "openai": ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"],
+        "anthropic": [
+            "claude-sonnet-4-20250514",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
+            "claude-3-opus-20240229",
+        ],
+    }
+
     openai_api_key: str | None = None
     openai_base_url: str | None = None
     openai_model: str = "gpt-4o-mini"
@@ -54,6 +70,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     anthropic_base_url: str | None = None
     anthropic_model: str = "claude-sonnet-4-20250514"
+
+    glm_api_key: str | None = None
+    glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    glm_model: str = "glm-5.1"
+    glm_send_temperature: bool = True
+    glm_timeout: float = 120.0
 
     claude_cli_path: str | None = None
     agent_max_turns: int = 30

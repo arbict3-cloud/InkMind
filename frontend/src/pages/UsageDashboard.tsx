@@ -198,10 +198,21 @@ export default function UsageDashboard() {
       title: t("usage_table_provider"),
       dataIndex: "provider" as const,
       key: "provider",
-      render: (provider: string) => (
-        <Text strong style={{ color: primaryColor }}>
-          {provider || "-"}
-        </Text>
+      render: (provider: string, record: { source?: string }) => (
+        <Space direction="vertical" size={0}>
+          <Text strong style={{ color: primaryColor }}>
+            {provider || "-"}
+          </Text>
+          {record.source === "custom" ? (
+            <Tag color="orange" style={{ fontSize: "0.7rem", lineHeight: "1.2", padding: "0 4px" }}>
+              {t("ai_settings_custom_tag")}
+            </Tag>
+          ) : (
+            <Tag color="blue" style={{ fontSize: "0.7rem", lineHeight: "1.2", padding: "0 4px" }}>
+              {t("ai_settings_builtin_tag")}
+            </Tag>
+          )}
+        </Space>
       ),
       width: 140,
     },
@@ -314,18 +325,28 @@ export default function UsageDashboard() {
             </Col>
             <Col xs={24} sm={12} lg={6}>
               {renderMetricCard({
-                title: t("usage_total_input"),
-                value: fmtK(data.total_input_tokens),
+                title: t("usage_builtin_tokens"),
+                value: fmtK(data.builtin_total_tokens),
                 icon: <InboxOutlined />,
                 color: "#5db8a6",
+                suffix: (
+                  <Tag color="blue" style={{ fontSize: "0.65rem", lineHeight: "1.2", padding: "0 4px", marginLeft: 6 }}>
+                    {t("ai_settings_builtin_tag")}
+                  </Tag>
+                ),
               })}
             </Col>
             <Col xs={24} sm={12} lg={6}>
               {renderMetricCard({
-                title: t("usage_total_output"),
-                value: fmtK(data.total_output_tokens),
+                title: t("usage_custom_tokens"),
+                value: fmtK(data.custom_total_tokens),
                 icon: <SendOutlined />,
-                color: "#5db872",
+                color: "#d48806",
+                suffix: (
+                  <Tag color="orange" style={{ fontSize: "0.65rem", lineHeight: "1.2", padding: "0 4px", marginLeft: 6 }}>
+                    {t("ai_settings_custom_tag")}
+                  </Tag>
+                ),
               })}
             </Col>
             {hasQuota && (

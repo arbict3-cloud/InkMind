@@ -7,9 +7,18 @@ from app.llm.llm_errors import LLMRequestError, wrap_anthropic_error
 
 
 class AnthropicLLM(LLMProvider):
-    def __init__(self) -> None:
-        self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        self._model = settings.anthropic_model
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        client_kwargs: dict = {"api_key": api_key or settings.anthropic_api_key}
+        if base_url or settings.anthropic_base_url:
+            client_kwargs["base_url"] = base_url or settings.anthropic_base_url
+        self._client = anthropic.Anthropic(**client_kwargs)
+        self._model = model or settings.anthropic_model
 
     def stream_complete(self, system: str, user: str, *, max_tokens: int | None = None) -> Iterator[str]:
         effective_max = max_tokens or 8192

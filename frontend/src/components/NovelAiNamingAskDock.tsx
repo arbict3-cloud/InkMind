@@ -37,7 +37,7 @@ export default function NovelAiNamingAskDock({ novelId }: Props) {
     (async () => {
       try {
         const meta = await fetchLlmProviders();
-        setLlmOptions(meta.available);
+        setLlmOptions(meta.builtin.map((p) => p.id));
       } catch {
         setLlmOptions([]);
       }

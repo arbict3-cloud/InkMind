@@ -1,5 +1,5 @@
 import axios, { AxiosError } from "axios";
-import type { BackgroundTask, Chapter, ChapterVersion, ChapterVersionDiff, Character, CreateBatchTaskRequest, CreateSingleTaskRequest, LlmUsageSummary, Memo, Novel, TaskProgress, User } from "@/types";
+import type { BackgroundTask, Chapter, ChapterVersion, ChapterVersionDiff, Character, CreateBatchTaskRequest, CreateSingleTaskRequest, CustomLlmInfo, LlmProvidersResponse, LlmUsageSummary, Memo, Novel, TaskProgress, User } from "@/types";
 import type {
   WorkflowProgress,
   CreateWorkflowRequest,
@@ -217,6 +217,7 @@ export async function authMe() {
 
 export async function patchAuthMe(payload: {
   preferred_llm_provider?: string | null;
+  preferred_llm_model?: string | null;
   agent_mode?: string | null;
   max_llm_iterations?: number | null;
   max_tokens_per_task?: number | null;
@@ -224,6 +225,11 @@ export async function patchAuthMe(payload: {
   preview_before_save?: boolean | null;
   auto_audit_min_score?: number | null;
   ai_language?: string | null;
+  agent_use_custom?: boolean | null;
+  agent_custom_llm_id?: number | null;
+  agent_model?: string | null;
+  generation_use_custom?: boolean | null;
+  generation_custom_llm_id?: number | null;
 }) {
   const { data } = await api.patch<User>("/auth/me", payload);
   return data;
@@ -286,7 +292,6 @@ export async function generateChapter(
     chapterId?: number | null;
     title?: string | null;
     lockTitle?: boolean;
-    wordCount?: number | null;
     onToken?: (chunk: string) => void;
     onProgress?: (progress: ProgressEvent) => void;
   }
@@ -298,7 +303,6 @@ export async function generateChapter(
       chapter_id: options?.chapterId ?? null,
       title: options?.title?.trim() ? options.title.trim() : null,
       lock_title: options?.lockTitle ?? false,
-      word_count: (options?.wordCount && options.wordCount >= 500 && options.wordCount <= 4000) ? options.wordCount : null,
     },
     { onToken: options?.onToken, onProgress: options?.onProgress }
   );
@@ -332,16 +336,12 @@ export async function generateChapterBatch(
     chapter_count: number;
     total_summary: string;
     after_chapter_id?: number | null;
-    word_count?: number | null;
   },
   options?: { onToken?: (chunk: string) => void; signal?: AbortSignal }
 ) {
   const r = await postNdjsonAi(
     `/novels/${novelId}/chapters/generate-batch`,
-    {
-      ...payload,
-      word_count: (payload.word_count && payload.word_count >= 500 && payload.word_count <= 4000) ? payload.word_count : null,
-    },
+    payload,
     { onToken: options?.onToken, signal: options?.signal }
   );
   if (!r.chapters) throw new Error("未收到批量章节数据");
@@ -506,8 +506,38 @@ export async function deleteMemo(novelId: number, memoId: number) {
 }
 
 export async function fetchLlmProviders() {
-  const { data } = await api.get<{ available: string[]; default: string }>("/meta/llm-providers");
+  const { data } = await api.get<LlmProvidersResponse>("/meta/llm-providers");
   return data;
+}
+
+export async function listCustomLLMs(): Promise<CustomLlmInfo[]> {
+  const { data } = await api.get<CustomLlmInfo[]>("/custom-llms");
+  return data;
+}
+
+export async function createCustomLLM(payload: {
+  provider: string;
+  api_key: string;
+  base_url?: string | null;
+}): Promise<CustomLlmInfo> {
+  const { data } = await api.post<CustomLlmInfo>("/custom-llms", payload);
+  return data;
+}
+
+export async function updateCustomLLM(
+  id: number,
+  payload: {
+    provider?: string;
+    api_key?: string;
+    base_url?: string | null;
+  }
+): Promise<CustomLlmInfo> {
+  const { data } = await api.patch<CustomLlmInfo>(`/custom-llms/${id}`, payload);
+  return data;
+}
+
+export async function deleteCustomLLM(id: number): Promise<void> {
+  await api.delete(`/custom-llms/${id}`);
 }
 
 async function detailFromBlob(blob: Blob): Promise<string> {
@@ -639,7 +669,6 @@ export async function createSingleBackgroundTask(payload: CreateSingleTaskReques
     title: payload.title?.trim() || null,
     summary: payload.summary,
     fixed_title: payload.fixed_title?.trim() || null,
-    word_count: (payload.word_count && payload.word_count >= 500 && payload.word_count <= 4000) ? payload.word_count : null,
     task_type: payload.task_type || "single_chapter",
   });
   return data;
@@ -651,7 +680,6 @@ export async function createBatchBackgroundTask(payload: CreateBatchTaskRequest)
     after_chapter_id: payload.after_chapter_id ?? null,
     total_summary: payload.total_summary,
     chapter_count: Math.max(1, Math.min(20, payload.chapter_count)),
-    word_count: (payload.word_count && payload.word_count >= 500 && payload.word_count <= 4000) ? payload.word_count : null,
   });
   return data;
 }
@@ -1065,7 +1093,6 @@ export function generateChapterSse(
     chapterId?: number | null;
     title?: string | null;
     lockTitle?: boolean;
-    wordCount?: number | null;
     signal?: AbortSignal;
   }
 ): Promise<void> {
@@ -1089,10 +1116,6 @@ export function generateChapterSse(
         chapter_id: options?.chapterId ?? null,
         title: options?.title?.trim() ? options.title.trim() : null,
         lock_title: options?.lockTitle ?? false,
-        word_count:
-          options?.wordCount && options.wordCount >= 500 && options.wordCount <= 4000
-            ? options.wordCount
-            : null,
       },
       wrappedHandlers,
       { signal: options?.signal }

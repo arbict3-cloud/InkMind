@@ -29,6 +29,7 @@ from app.config import settings
 from app.database import SessionLocal, get_db
 from app.deps import CurrentUser
 from app.language import Language
+from app.llm.providers import resolve_agent_llm_for_user
 from app.models import Novel
 from app.routers.novels import _get_owned_novel
 
@@ -59,8 +60,9 @@ class BatchTaskStatusRequest(BaseModel):
     task_ids: list[str] = Field(description="任务 ID 列表")
 
 
-def _get_backend() -> str:
-    if settings.anthropic_api_key:
+def _get_backend(user: object | None = None, db: Session | None = None) -> str:
+    agent_config = resolve_agent_llm_for_user(user, db)
+    if agent_config["api_key"]:
         return "anthropic"
     if settings.deepseek_api_key:
         return "deepseek-anthropic"
@@ -73,10 +75,11 @@ def _create_orchestrator(
     novel: Novel,
     language: Language,
 ) -> ClaudeOrchestrator:
-    if not settings.anthropic_api_key and not settings.deepseek_api_key:
+    agent_config = resolve_agent_llm_for_user(user, db)
+    if not agent_config["api_key"] and not settings.deepseek_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="未配置 ANTHROPIC_API_KEY 或 DEEPSEEK_API_KEY，Agent 功能不可用",
+            detail="未配置 AI 助手的 API Key，请在 AI 设置中配置 Anthropic API Key",
         )
     return ClaudeOrchestrator(SessionLocal, novel, user, language)
 
@@ -96,7 +99,7 @@ def create_session(
         "session_id": session.session_id,
         "novel_id": session.novel_id,
         "status": "idle",
-        "backend": _get_backend(),
+        "backend": _get_backend(user, db),
     }
 
 

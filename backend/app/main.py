@@ -7,7 +7,7 @@ from sqlalchemy import inspect, text
 from app.config import settings
 from app.database import Base, engine
 from app.observability.otel_setup import setup_otel
-from app.routers import admin, agent, auth, background_tasks, chapters, characters, memos, meta, novels, usage, workflow
+from app.routers import admin, agent, auth, background_tasks, chapters, characters, custom_llms, memos, meta, novels, usage, workflow
 
 
 def _migrate_sqlite() -> None:
@@ -18,7 +18,20 @@ def _migrate_sqlite() -> None:
         tables = insp.get_table_names()
         if "users" not in tables:
             return
+        table_names = {t["name"] for t in tables} if isinstance(tables, list) and tables and isinstance(tables[0], dict) else set(tables)
         with engine.begin() as conn:
+            if "user_custom_llms" not in table_names:
+                conn.execute(text("""
+                    CREATE TABLE user_custom_llms (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        provider VARCHAR(64) NOT NULL,
+                        api_key VARCHAR(512) NOT NULL,
+                        base_url VARCHAR(512),
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                conn.execute(text("CREATE INDEX ix_user_custom_llms_user_id ON user_custom_llms(user_id)"))
             cols_users = {c["name"] for c in insp.get_columns("users")}
             if "preferred_llm_provider" not in cols_users:
                 conn.execute(
@@ -48,19 +61,47 @@ def _migrate_sqlite() -> None:
                 conn.execute(text("ALTER TABLE users ADD COLUMN token_quota_used INTEGER NOT NULL DEFAULT 0"))
             if "token_quota_reset_at" not in cols_users:
                 conn.execute(text("ALTER TABLE users ADD COLUMN token_quota_reset_at DATETIME"))
-            if "novels" in tables:
+            if "agent_api_key" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN agent_api_key VARCHAR(512)"))
+            if "agent_base_url" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN agent_base_url VARCHAR(512)"))
+            if "agent_model" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN agent_model VARCHAR(128)"))
+            if "generation_provider" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN generation_provider VARCHAR(64)"))
+            if "generation_api_key" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN generation_api_key VARCHAR(512)"))
+            if "generation_base_url" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN generation_base_url VARCHAR(512)"))
+            if "generation_model" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN generation_model VARCHAR(128)"))
+            if "preferred_llm_model" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN preferred_llm_model VARCHAR(128)"))
+            if "generation_use_custom" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN generation_use_custom BOOLEAN NOT NULL DEFAULT 0"))
+            if "agent_use_custom" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN agent_use_custom BOOLEAN NOT NULL DEFAULT 0"))
+            if "agent_custom_llm_id" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN agent_custom_llm_id INTEGER REFERENCES user_custom_llms(id) ON DELETE SET NULL"))
+            if "generation_custom_llm_id" not in cols_users:
+                conn.execute(text("ALTER TABLE users ADD COLUMN generation_custom_llm_id INTEGER REFERENCES user_custom_llms(id) ON DELETE SET NULL"))
+            if "novels" in table_names:
                 ncols = {c["name"] for c in insp.get_columns("novels")}
                 if "outline" in ncols and "background" not in ncols:
                     conn.execute(text("ALTER TABLE novels RENAME COLUMN outline TO background"))
-            if "characters" in tables:
+            if "characters" in table_names:
                 cols = {c["name"] for c in insp.get_columns("characters")}
                 if "relationships" in cols:
                     try:
                         conn.execute(text("ALTER TABLE characters DROP COLUMN relationships"))
                     except Exception:
                         pass
-            if "character_relationships" in tables:
+            if "character_relationships" in table_names:
                 conn.execute(text("DROP TABLE IF EXISTS character_relationships"))
+            if "llm_usage_events" in table_names:
+                cols_usage = {c["name"] for c in insp.get_columns("llm_usage_events")}
+                if "source" not in cols_usage:
+                    conn.execute(text("ALTER TABLE llm_usage_events ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'builtin'"))
     except Exception:
         pass
 
@@ -108,6 +149,7 @@ app.include_router(background_tasks.router)
 app.include_router(admin.router)
 app.include_router(workflow.router)
 app.include_router(agent.router)
+app.include_router(custom_llms.router)
 
 setup_otel(app)
 

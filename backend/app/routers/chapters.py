@@ -147,7 +147,7 @@ def generate_chapter(
 
     req_title = (body.title or "").strip()
     fixed_title = req_title if body.lock_title and req_title else None
-    word_count = body.word_count if body.word_count and 500 <= body.word_count <= 4000 else None
+    word_count = body.word_count if body.word_count and 1000 <= body.word_count <= 4000 else None
     provider_name = normalize_provider_name(None, user)
 
     agent_mode = getattr(user, "agent_mode", "flexible")
@@ -337,7 +337,7 @@ def generate_chapter_sse(
 
     req_title = (body.title or "").strip()
     fixed_title = req_title if body.lock_title and req_title else None
-    word_count = body.word_count if body.word_count and 500 <= body.word_count <= 4000 else None
+    word_count = body.word_count if body.word_count and 1000 <= body.word_count <= 4000 else None
     provider_name = normalize_provider_name(None, user)
 
     agent_mode = getattr(user, "agent_mode", "flexible")

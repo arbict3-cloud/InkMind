@@ -90,7 +90,6 @@ export default function NovelWrite() {
   const [generateMode, setGenerateMode] = useState<"foreground" | "background">("foreground");
   const [singleGenerateTitle, setSingleGenerateTitle] = useState("");
   const [singleGenerateLockTitle, setSingleGenerateLockTitle] = useState(false);
-  const [generateWordCount, setGenerateWordCount] = useState<number | null>(null);
   const [batchChapterCountInput, setBatchChapterCountInput] = useState("3");
   const [batchSummary, setBatchSummary] = useState("");
   const [batchStreaming, setBatchStreaming] = useState("");
@@ -222,7 +221,7 @@ export default function NovelWrite() {
         const [list, meta] = await Promise.all([fetchChapters(id), fetchLlmProviders()]);
         if (cancelled || novelIdRef.current !== id) return;
         setChapters(list);
-        setLlmOptions(meta.available);
+        setLlmOptions(meta.builtin.map((p) => p.id));
         if (list.length > 0) {
           setActiveId(list[0].id);
         } else {
@@ -845,7 +844,6 @@ export default function NovelWrite() {
         chapterId: activeId,
         title: singleGenerateTitle.trim() || null,
         lockTitle: singleGenerateLockTitle,
-        wordCount: generateWordCount,
         onToken: (t) => {
           if (novelIdRef.current === nid) setContent((p) => p + t);
         },
@@ -876,7 +874,6 @@ export default function NovelWrite() {
         setContent(normalizeBodyParagraphIndent(ch.content));
         setSingleGenerateTitle("");
         setSingleGenerateLockTitle(false);
-        setGenerateWordCount(null);
       } else {
         throw new Error(t("write_err_no_result"));
       }
@@ -917,7 +914,6 @@ export default function NovelWrite() {
       setIsPreviewMode(false);
       setSingleGenerateTitle("");
       setSingleGenerateLockTitle(false);
-      setGenerateWordCount(null);
     } catch (e) {
       setErr(apiErrorMessage(e));
     } finally {
@@ -963,7 +959,6 @@ export default function NovelWrite() {
           chapter_count: batchChapterCount,
           total_summary: total,
           after_chapter_id: activeId,
-          word_count: generateWordCount,
         },
         {
           onToken: (t) => {
@@ -979,7 +974,6 @@ export default function NovelWrite() {
         setActiveId(created[0].id);
       }
       setGenerateTab("single");
-      setGenerateWordCount(null);
       setBatchStreaming((prev) => prev + `${t("write_batch_complete")} ${created.length} ${t("write_batch_chapters")}`);
     } catch (e) {
       if (novelIdRef.current === nid) {
@@ -1008,7 +1002,6 @@ export default function NovelWrite() {
         title: singleGenerateTitle.trim() || null,
         summary: s,
         fixed_title: singleGenerateLockTitle ? (singleGenerateTitle.trim() || null) : null,
-        word_count: generateWordCount,
         task_type: hasBody ? "rewrite_chapter" : "single_chapter",
       });
       
@@ -1048,7 +1041,6 @@ export default function NovelWrite() {
         after_chapter_id: activeId,
         total_summary: total,
         chapter_count: batchChapterCount,
-        word_count: generateWordCount,
       });
       
       nav("/tasks");
@@ -1516,31 +1508,6 @@ export default function NovelWrite() {
                       />
                       <span>{t("write_lock_title_desc")}</span>
                     </label>
-                    <div className="field">
-                      <label htmlFor="write-ai-word-count">{t("write_target_word_count")}</label>
-                      <select
-                        id="write-ai-word-count"
-                        className="select"
-                        value={generateWordCount ?? ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setGenerateWordCount(val ? parseInt(val, 10) : null);
-                        }}
-                      >
-                        <option value="">{t("write_word_count_ai_decide")}</option>
-                        <option value="500">500 {t("write_stat_words")}</option>
-                        <option value="1000">1000 {t("write_stat_words")}</option>
-                        <option value="1500">1500 {t("write_stat_words")}</option>
-                        <option value="2000">2000 {t("write_stat_words")}</option>
-                        <option value="2500">2500 {t("write_stat_words")}</option>
-                        <option value="3000">3000 {t("write_stat_words")}</option>
-                        <option value="3500">3500 {t("write_stat_words")}</option>
-                        <option value="4000">4000 {t("write_stat_words")}</option>
-                      </select>
-                      <p className="muted write-hint-sm">
-                        {t("write_word_count_approx")}
-                      </p>
-                    </div>
                     <div className="field write-field-mb">
                       <label>{t("write_generate_mode")}</label>
                       <div className="write-generate-mode-row">
@@ -1653,31 +1620,6 @@ export default function NovelWrite() {
                         {t("write_batch_latest_only_note")}
                       </p>
                     ) : null}
-                    <div className="field">
-                      <label htmlFor="write-ai-batch-word-count">{t("write_per_chapter_word_count")}</label>
-                      <select
-                        id="write-ai-batch-word-count"
-                        className="select"
-                        value={generateWordCount ?? ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setGenerateWordCount(val ? parseInt(val, 10) : null);
-                        }}
-                      >
-                        <option value="">{t("write_word_count_ai_decide")}</option>
-                        <option value="500">500 {t("write_stat_words")}</option>
-                        <option value="1000">1000 {t("write_stat_words")}</option>
-                        <option value="1500">1500 {t("write_stat_words")}</option>
-                        <option value="2000">2000 {t("write_stat_words")}</option>
-                        <option value="2500">2500 {t("write_stat_words")}</option>
-                        <option value="3000">3000 {t("write_stat_words")}</option>
-                        <option value="3500">3500 {t("write_stat_words")}</option>
-                        <option value="4000">4000 {t("write_stat_words")}</option>
-                      </select>
-                      <p className="muted write-hint-sm">
-                        {t("write_word_count_approx")}
-                      </p>
-                    </div>
                     <div className="field write-field-mb">
                       <div className="write-ai-field-label">
                         <label htmlFor="write-ai-batch-summary">{t("write_overall_summary")}</label>

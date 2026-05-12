@@ -131,7 +131,7 @@ AskUserQuestion 的正确用法：
   header: "续写方向"
   options: [
     {label: "紧凑推进", description: "直接保存这版，紧凑推进剧情"},
-    {label: "扩充细节", description: "扩充到1000-1500字，增加更多对抗细节和描写"}
+    {label: "扩充细节", description: "扩充到2000-2500字，增加更多对抗细节和描写"}
   ]
 
 ## 可用操作
@@ -351,15 +351,22 @@ async def _pre_tool_use_hook(
     return {"continue_": True}
 
 
-def _build_agent_options(novel_id: int, session_id: str = "") -> ClaudeAgentOptions:
+def _build_agent_options(novel_id: int, session_id: str = "", user: User | None = None) -> ClaudeAgentOptions:
     from claude_agent_sdk.types import HookMatcher
+    from app.llm.providers import resolve_agent_llm_for_user
     mcp_server = _build_mcp_server(novel_id, session_id)
 
+    db = SessionLocal()
+    try:
+        agent_config = resolve_agent_llm_for_user(user, db)
+    finally:
+        db.close()
+
     env_overrides: dict[str, str] = {}
-    if settings.anthropic_api_key:
-        env_overrides["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
-    if settings.anthropic_base_url:
-        env_overrides["ANTHROPIC_BASE_URL"] = settings.anthropic_base_url
+    if agent_config["api_key"]:
+        env_overrides["ANTHROPIC_API_KEY"] = agent_config["api_key"]
+    if agent_config["base_url"]:
+        env_overrides["ANTHROPIC_BASE_URL"] = agent_config["base_url"]
 
     options_kwargs: dict[str, Any] = {
         "system_prompt": _ORCHESTRATOR_SYSTEM_PROMPT,
@@ -375,7 +382,9 @@ def _build_agent_options(novel_id: int, session_id: str = "") -> ClaudeAgentOpti
         options_kwargs["env"] = env_overrides
     if settings.claude_cli_path:
         options_kwargs["cli_path"] = settings.claude_cli_path
-    if settings.anthropic_model:
+    if agent_config.get("model"):
+        options_kwargs["model"] = agent_config["model"]
+    elif settings.anthropic_model:
         options_kwargs["model"] = settings.anthropic_model
     return ClaudeAgentOptions(**options_kwargs)
 
@@ -520,7 +529,7 @@ class ClaudeOrchestrator:
                     tool_name="agent_connect",
                     thought="连接 AI 总指挥",
                 )
-                options = _build_agent_options(session.novel_id, session.session_id)
+                options = _build_agent_options(session.novel_id, session.session_id, user=self._user)
                 client = ClaudeSDKClient(options=options)
                 await asyncio.wait_for(
                     client.connect(),
