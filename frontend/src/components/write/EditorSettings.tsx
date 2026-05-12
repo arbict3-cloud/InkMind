@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/i18n";
-import type { LineHeightId, LineWidthId, WriteBodyFontSizeId } from "./types";
+import type { LineHeightId, LineWidthId, WriteBodyFontSizeId, TypewriterModeId } from "./types";
 
 const LINE_HEIGHT_IDS: LineHeightId[] = ["compact", "normal", "relaxed", "loose"];
 const LINE_HEIGHT_VALUES: Record<LineHeightId, number> = { compact: 1.6, normal: 1.85, relaxed: 2.0, loose: 2.2 };
@@ -17,6 +17,7 @@ const LINE_WIDTH_MAX_WIDTHS: Record<LineWidthId, string | null> = { md: "55ch", 
 const LINE_WIDTH_LABEL_KEYS: Record<LineWidthId, string> = { md: "write_line_width_md", lg: "write_line_width_lg", full: "write_line_width_full" };
 const WRITE_LINE_WIDTH_KEY = "inkmind_write_line_width";
 const WRITE_FOCUS_MODE_KEY = "inkmind_write_focus_mode";
+const WRITE_TYPEWRITER_MODE_KEY = "inkmind_write_typewriter_mode";
 
 const WRITE_BODY_FONT_SIZE_IDS: WriteBodyFontSizeId[] = ["xs", "sm", "md", "lg", "xl", "xxl"];
 const WRITE_BODY_FONT_SIZE_PX: Record<WriteBodyFontSizeId, number> = { xs: 14, sm: 16, md: 17, lg: 19, xl: 21, xxl: 24 };
@@ -84,11 +85,20 @@ function readStoredFocusMode(): boolean {
   try { return localStorage.getItem(WRITE_FOCUS_MODE_KEY) === "true"; } catch { return false; }
 }
 
+function readStoredTypewriterMode(): TypewriterModeId {
+  try {
+    const v = localStorage.getItem(WRITE_TYPEWRITER_MODE_KEY);
+    if (v === "on" || v === "off") return v;
+  } catch { /* ignore */ }
+  return "off";
+}
+
 export interface EditorSettingsState {
   bodyFontSizeId: WriteBodyFontSizeId;
   lineHeightId: LineHeightId;
   lineWidthId: LineWidthId;
   focusMode: boolean;
+  typewriterMode: TypewriterModeId;
   bodyFontSizePx: number;
 }
 
@@ -97,11 +107,13 @@ export function useEditorSettings(): EditorSettingsState & {
   setLineHeightId: (id: LineHeightId) => void;
   setLineWidthId: (id: LineWidthId) => void;
   setFocusMode: (fn: (v: boolean) => boolean) => void;
+  setTypewriterMode: (id: TypewriterModeId) => void;
 } {
   const [bodyFontSizeId, setBodyFontSizeId] = useState<WriteBodyFontSizeId>(readStoredBodyFontSizeId);
   const [lineHeightId, setLineHeightId] = useState<LineHeightId>(readStoredLineHeight);
   const [lineWidthId, setLineWidthId] = useState<LineWidthId>(readStoredLineWidth);
   const [focusMode, setFocusModeRaw] = useState<boolean>(readStoredFocusMode);
+  const [typewriterMode, setTypewriterMode] = useState<TypewriterModeId>(readStoredTypewriterMode);
 
   const setFocusMode = (fn: (v: boolean) => boolean) => setFocusModeRaw(fn);
 
@@ -109,12 +121,14 @@ export function useEditorSettings(): EditorSettingsState & {
   useEffect(() => { localStorage.setItem(WRITE_LINE_HEIGHT_KEY, lineHeightId); }, [lineHeightId]);
   useEffect(() => { localStorage.setItem(WRITE_LINE_WIDTH_KEY, lineWidthId); }, [lineWidthId]);
   useEffect(() => { localStorage.setItem(WRITE_FOCUS_MODE_KEY, String(focusMode)); }, [focusMode]);
+  useEffect(() => { localStorage.setItem(WRITE_TYPEWRITER_MODE_KEY, typewriterMode); }, [typewriterMode]);
 
   return {
     bodyFontSizeId, setBodyFontSizeId,
     lineHeightId, setLineHeightId,
     lineWidthId, setLineWidthId,
     focusMode, setFocusMode,
+    typewriterMode, setTypewriterMode,
     bodyFontSizePx: WRITE_BODY_FONT_SIZE_PX[bodyFontSizeId],
   };
 }
@@ -129,7 +143,7 @@ interface EditorSettingsProps {
 
 export default memo(function EditorSettings({ settings, sidebarToolsRef, sidebarOpen, onToggleSidebar, onDrawerClose }: EditorSettingsProps) {
   const { t } = useI18n();
-  const { bodyFontSizeId, setBodyFontSizeId, lineHeightId, setLineHeightId, lineWidthId, setLineWidthId, focusMode, setFocusMode } = settings;
+  const { bodyFontSizeId, setBodyFontSizeId, lineHeightId, setLineHeightId, lineWidthId, setLineWidthId, focusMode, setFocusMode, typewriterMode, setTypewriterMode } = settings;
 
   const [sizeMenuOpen, setSizeMenuOpen] = useState(false);
   const [lineHeightMenuOpen, setLineHeightMenuOpen] = useState(false);
@@ -335,6 +349,23 @@ export default memo(function EditorSettings({ settings, sidebarToolsRef, sidebar
             <span /><span /><span /><span />
           </span>
         </button>
+
+        <button
+          type="button"
+          className={`write-icon-btn write-typewriter-btn${typewriterMode === "on" ? " is-active" : ""}`}
+          title={typewriterMode === "on" ? t("write_typewriter_mode_on") : t("write_typewriter_mode_off")}
+          aria-label={t("write_typewriter_mode")}
+          onClick={() => setTypewriterMode(typewriterMode === "on" ? "off" : "on")}
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="5" width="14" height="9" rx="1.5" />
+            <line x1="5" y1="8" x2="5" y2="11" />
+            <line x1="9" y1="8" x2="9" y2="11" />
+            <line x1="13" y1="8" x2="13" y2="11" />
+            <line x1="7" y1="11" x2="11" y2="11" />
+            <path d="M6 5V3.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V5" />
+          </svg>
+        </button>
       </div>
     </div>
   );
@@ -349,5 +380,6 @@ export default memo(function EditorSettings({ settings, sidebarToolsRef, sidebar
     && ps.lineHeightId === ns.lineHeightId
     && ps.lineWidthId === ns.lineWidthId
     && ps.focusMode === ns.focusMode
+    && ps.typewriterMode === ns.typewriterMode
     && ps.bodyFontSizePx === ns.bodyFontSizePx;
 });

@@ -53,7 +53,7 @@ export default function NovelWrite() {
   const { theme } = useTheme();
   const { t } = useI18n();
   const editorSettings = useEditorSettings();
-  const { lineHeightId, lineWidthId, focusMode, setFocusMode, bodyFontSizePx } = editorSettings;
+  const { lineHeightId, lineWidthId, focusMode, setFocusMode, bodyFontSizePx, typewriterMode } = editorSettings;
 
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -107,6 +107,10 @@ export default function NovelWrite() {
   const selectionRangeRef = useRef<{ start: number; end: number } | null>(null);
   selectionRangeRef.current = selectionRange;
   const [err, setErr] = useState("");
+
+  type SaveStatus = "saved" | "saving" | "unsaved";
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   const [previewResult, setPreviewResult] = useState<ChapterPreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -197,6 +201,17 @@ export default function NovelWrite() {
       setRightTool(null);
     }
   }, [focusMode]);
+
+  useEffect(() => {
+    if (typewriterMode !== "on") return;
+    const ta = bodyTextareaRef.current;
+    if (!ta) return;
+    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 24;
+    const visibleHeight = ta.clientHeight;
+    const cursorLine = ta.value.substring(0, ta.selectionEnd).split("\n").length;
+    const targetScroll = cursorLine * lineHeight - visibleHeight / 2;
+    ta.scrollTop = Math.max(0, targetScroll);
+  }, [content, typewriterMode]);
 
   useEffect(() => {
     if (!Number.isFinite(id)) return;
@@ -578,10 +593,11 @@ export default function NovelWrite() {
     !selectionPanel;
 
   useLayoutEffect(() => {
-    if (!showSelectionBar) {
+    if (!showSelectionBar && !selectionPanel) {
       setSelectionMenuPos(null);
       return;
     }
+    if (!showSelectionBar) return;
     const ta = bodyTextareaRef.current;
     const r = selectionRangeRef.current;
     if (!ta || !r || r.start === r.end) {
@@ -623,8 +639,15 @@ export default function NovelWrite() {
     const before = chaptersRef.current.find((x) => x.id === aid);
     if (!before) return;
     if (before.title === t && before.summary === s && before.content === c) return;
-    const ch = await updateChapter(id, aid, { title: t, summary: s, content: c });
-    setChapters((prev) => prev.map((x) => (x.id === ch.id ? ch : x)));
+    setSaveStatus("saving");
+    try {
+      const ch = await updateChapter(id, aid, { title: t, summary: s, content: c });
+      setChapters((prev) => prev.map((x) => (x.id === ch.id ? ch : x)));
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("unsaved");
+      throw new Error("flush save failed");
+    }
   }, [id]);
 
   const selectChapter = useCallback(async (cid: number) => {
@@ -641,6 +664,18 @@ export default function NovelWrite() {
     if (narrowRef.current) setSidebarOpen(false);
   }, [flushSave]);
 
+  const activeIndex = chapters.findIndex((c) => c.id === activeId);
+  const hasPrevChapter = activeIndex > 0;
+  const hasNextChapter = activeIndex >= 0 && activeIndex < chapters.length - 1;
+
+  const goToPrevChapter = useCallback(() => {
+    if (activeIndex > 0) selectChapter(chapters[activeIndex - 1].id);
+  }, [activeIndex, chapters, selectChapter]);
+
+  const goToNextChapter = useCallback(() => {
+    if (activeIndex >= 0 && activeIndex < chapters.length - 1) selectChapter(chapters[activeIndex + 1].id);
+  }, [activeIndex, chapters, selectChapter]);
+
   useEffect(() => {
     if (rightTool === "versions" && activeId !== null) {
       loadVersions();
@@ -652,16 +687,21 @@ export default function NovelWrite() {
     if (isPreviewMode) return;
     const snap = chapters.find((c) => c.id === activeId);
     if (!snap) return;
-    if (snap.title === title && snap.summary === summary && snap.content === content) return;
+    if (snap.title === title && snap.summary === summary && snap.content === content) {
+      setSaveStatus("saved");
+      return;
+    }
     if (debounceTimerRef.current !== null) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
+    setSaveStatus("unsaved");
     const scheduledForId = activeId;
     debounceTimerRef.current = window.setTimeout(() => {
       debounceTimerRef.current = null;
       if (activeIdRef.current !== scheduledForId) return;
       void (async () => {
+        setSaveStatus("saving");
         try {
           const ch = await updateChapter(id, scheduledForId, {
             title,
@@ -670,8 +710,10 @@ export default function NovelWrite() {
             skip_version: true,
           } as Parameters<typeof updateChapter>[2]);
           setChapters((prev) => prev.map((c) => (c.id === ch.id ? ch : c)));
+          setSaveStatus("saved");
         } catch (e) {
           setErr(apiErrorMessage(e));
+          setSaveStatus("unsaved");
         }
       })();
     }, 850);
@@ -1250,38 +1292,91 @@ export default function NovelWrite() {
             {activeId ? (
               <>
                 <div className="write-editor-header">
-                  <input
-                    className="editor-title editor-title--improved"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder={t("write_chapter_title_placeholder")}
-                  />
-                  {!focusMode ? (
-                    <div className="write-chapter-actions" aria-label={t("write_chapter_actions")}>
+                  <div className="write-editor-title-row">
+                    <div className="write-editor-nav">
                       <button
                         type="button"
-                        className="write-chapter-action"
-                        disabled={!hasLlm || evaluateBusy || busy || !activeId}
-                        onClick={() => void onRunEvaluate()}
+                        className="write-icon-btn write-nav-btn"
+                        disabled={!hasPrevChapter}
+                        title={t("write_prev_chapter")}
+                        aria-label={t("write_prev_chapter")}
+                        onClick={goToPrevChapter}
                       >
-                        {evaluateBusy ? t("write_evaluating") : t("write_tool_evaluate")}
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M10 3L5 8l5 5" /></svg>
                       </button>
                       <button
                         type="button"
-                        className={`write-chapter-action${rightTool === "versions" ? " is-active" : ""}`}
-                        disabled={!activeId}
-                        onClick={toggleVersionsPanel}
+                        className="write-icon-btn write-nav-btn"
+                        disabled={!hasNextChapter}
+                        title={t("write_next_chapter")}
+                        aria-label={t("write_next_chapter")}
+                        onClick={goToNextChapter}
                       >
-                        {t("write_tool_versions")}
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3l5 5-5 5" /></svg>
                       </button>
                     </div>
-                  ) : null}
+                    <input
+                      className="editor-title editor-title--improved"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder={t("write_chapter_title_placeholder")}
+                    />
+                  </div>
+                  <div className="write-editor-subtitle-row">
+                    <button
+                      type="button"
+                      className="write-summary-toggle"
+                      onClick={() => setSummaryOpen((v) => !v)}
+                      aria-expanded={summaryOpen}
+                      aria-label={summaryOpen ? t("write_summary_collapse") : t("write_summary_expand")}
+                    >
+                      <svg className={`write-summary-toggle__chevron${summaryOpen ? " is-open" : ""}`} width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5l3 3 3-3" /></svg>
+                      <span className="write-summary-toggle__label">{t("write_chapter_summary")}</span>
+                    </button>
+                    <span className={`write-save-status write-save-status--${saveStatus}`}>
+                      {saveStatus === "saving" && <span className="write-save-dot write-save-dot--saving" aria-hidden />}
+                      {saveStatus === "saved" && <span className="write-save-dot write-save-dot--saved" aria-hidden />}
+                      {saveStatus === "unsaved" && <span className="write-save-dot write-save-dot--unsaved" aria-hidden />}
+                      {saveStatus === "saving" ? t("write_saving") : saveStatus === "saved" ? t("write_saved") : t("write_save_unsaved")}
+                    </span>
+                    {!focusMode ? (
+                      <div className="write-chapter-actions" aria-label={t("write_chapter_actions")}>
+                        <button
+                          type="button"
+                          className="write-chapter-action"
+                          disabled={!hasLlm || evaluateBusy || busy || !activeId}
+                          onClick={() => void onRunEvaluate()}
+                        >
+                          {evaluateBusy ? t("write_evaluating") : t("write_tool_evaluate")}
+                        </button>
+                        <button
+                          type="button"
+                          className={`write-chapter-action${rightTool === "versions" ? " is-active" : ""}`}
+                          disabled={!activeId}
+                          onClick={toggleVersionsPanel}
+                        >
+                          {t("write_tool_versions")}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  {summaryOpen && (
+                    <div className="write-summary-panel">
+                      <textarea
+                        className="textarea write-summary-textarea"
+                        rows={3}
+                        value={summary}
+                        onChange={(e) => setSummary(e.target.value)}
+                        placeholder={t("write_chapter_summary_placeholder")}
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className={`write-body-wrapper write-body-wrapper--${lineWidthId}`}>
                   <div className="field write-body-field">
                     <textarea
                       ref={bodyTextareaRef}
-                      className={`textarea editor-body editor-body--line-height-${lineHeightId}`}
+                      className={`textarea editor-body editor-body--line-height-${lineHeightId}${typewriterMode === "on" ? " editor-body--typewriter" : ""}`}
                       style={{ fontSize: `${bodyFontSizePx}px` }}
                       value={content}
                       onChange={(e) => setContent(e.target.value)}
@@ -1293,55 +1388,6 @@ export default function NovelWrite() {
                     />
                   </div>
                 </div>
-                {selectionPanel ? (
-                  <div className="write-inline-result" role="status">
-                    <div className="write-inline-result__head">
-                      <span>
-                        {selectionPanel.mode === "rewrite" && t("write_selection_rewrite_title")}
-                        {selectionPanel.mode === "expand" && t("write_selection_expand_title")}
-                        {selectionPanel.mode === "polish" && t("write_selection_polish_title")}
-                        {selectionPanel.mode === "append" && t("write_selection_append_title")}
-                      </span>
-                      <button type="button" className="write-inline-result__close" onClick={closeSelectionPanel}>
-                        {t("write_selection_exit")}
-                      </button>
-                    </div>
-                    <div className="write-inline-result__body">
-                      {selectionPanel.streaming || (busy ? t("write_generating") : "")}
-                    </div>
-                    <div className="write-inline-result__actions">
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        disabled={busy || !selectionPanel.text.trim()}
-                        onClick={applySelectionReplace}
-                      >
-                        {selectionPanel.mode === "append" ? t("write_selection_insert") : t("write_selection_replace")}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        disabled={busy || !selectionPanel.text.trim()}
-                        onClick={() => void copySelectionResult()}
-                      >
-                        {t("write_selection_copy")}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        disabled={busy}
-                        onClick={() =>
-                          void runSelectionAi(selectionPanel.mode, {
-                            start: selectionPanel.start,
-                            end: selectionPanel.end,
-                          })
-                        }
-                      >
-                        {t("write_selection_regenerate")}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
                 {evaluateResult ? (
                   <div className="write-inline-result write-inline-result--eval">
                     <div className="write-inline-result__head">
@@ -1989,6 +2035,60 @@ export default function NovelWrite() {
           onAddToCharacter={() => void addSelectionToCharacter()}
           onAddToMemo={() => void addSelectionToMemo()}
         />
+      ) : null}
+
+      {selectionPanel && selectionMenuPos ? (
+        <div
+          className="write-selection-result-float"
+          role="status"
+          style={{ top: selectionMenuPos.top + 8, left: selectionMenuPos.left }}
+        >
+          <div className="write-selection-result-float__head">
+            <span>
+              {selectionPanel.mode === "rewrite" && t("write_selection_rewrite_title")}
+              {selectionPanel.mode === "expand" && t("write_selection_expand_title")}
+              {selectionPanel.mode === "polish" && t("write_selection_polish_title")}
+              {selectionPanel.mode === "append" && t("write_selection_append_title")}
+            </span>
+            <button type="button" className="write-selection-result-float__close" onClick={closeSelectionPanel}>
+              {t("write_selection_exit")}
+            </button>
+          </div>
+          <div className="write-selection-result-float__body">
+            {selectionPanel.streaming || (busy ? t("write_generating") : "")}
+          </div>
+          <div className="write-selection-result-float__actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !selectionPanel.text.trim()}
+              onClick={applySelectionReplace}
+            >
+              {selectionPanel.mode === "append" ? t("write_selection_insert") : t("write_selection_replace")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy || !selectionPanel.text.trim()}
+              onClick={() => void copySelectionResult()}
+            >
+              {t("write_selection_copy")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy}
+              onClick={() =>
+                void runSelectionAi(selectionPanel.mode, {
+                  start: selectionPanel.start,
+                  end: selectionPanel.end,
+                })
+              }
+            >
+              {t("write_selection_regenerate")}
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );

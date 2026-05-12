@@ -712,8 +712,11 @@ export const translations: Record<Language, Record<string, string>> = {
     
     write_saving: "保存中…",
     write_saved: "已保存",
+    write_save_unsaved: "未保存",
     write_prev_chapter: "上一章",
     write_next_chapter: "下一章",
+    write_summary_collapse: "收起概要",
+    write_summary_expand: "展开概要",
     write_no_chapter: "暂无章节",
     write_new_chapter: "新建章节",
     
@@ -769,6 +772,9 @@ export const translations: Record<Language, Record<string, string>> = {
     write_exit_focus_mode_shortcut: "退出专注模式 (Ctrl+.)",
     write_focus_mode_shortcut: "专注模式 (Ctrl+.)",
     write_focus_mode: "专注模式",
+    write_typewriter_mode: "打字机模式",
+    write_typewriter_mode_on: "关闭打字机滚动",
+    write_typewriter_mode_off: "开启打字机滚动",
     write_chapters: "章节",
     write_no_chapters: "暂无章节",
     write_chapter_n: "第",
@@ -1819,8 +1825,11 @@ export const translations: Record<Language, Record<string, string>> = {
     
     write_saving: "Saving…",
     write_saved: "Saved",
+    write_save_unsaved: "Unsaved",
     write_prev_chapter: "Previous",
     write_next_chapter: "Next",
+    write_summary_collapse: "Collapse summary",
+    write_summary_expand: "Expand summary",
     write_no_chapter: "No chapters",
     write_new_chapter: "New Chapter",
     
@@ -1876,6 +1885,9 @@ export const translations: Record<Language, Record<string, string>> = {
     write_exit_focus_mode_shortcut: "Exit Focus Mode (Ctrl+.)",
     write_focus_mode_shortcut: "Focus Mode (Ctrl+.)",
     write_focus_mode: "Focus Mode",
+    write_typewriter_mode: "Typewriter Mode",
+    write_typewriter_mode_on: "Disable typewriter scroll",
+    write_typewriter_mode_off: "Enable typewriter scroll",
     write_chapters: "Chapters",
     write_no_chapters: "No chapters",
     write_chapter_n: "Chapter",
