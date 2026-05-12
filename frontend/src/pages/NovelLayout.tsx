@@ -34,6 +34,7 @@ export default function NovelLayout() {
 
   const peopleTabActive = loc.pathname.startsWith(`/novels/${id}/people`);
   const memosTabActive = loc.pathname.startsWith(`/novels/${id}/memos`);
+  const writeTabActive = loc.pathname.includes("/write");
   const [novel, setNovel] = useState<Novel | null>(null);
   const [err, setErr] = useState("");
 
@@ -167,8 +168,8 @@ export default function NovelLayout() {
 
       <Content
         style={{
-          padding: "1rem",
-          maxWidth: 1200,
+          padding: writeTabActive ? "0.75rem 1rem 1rem" : "1rem",
+          maxWidth: writeTabActive ? 1280 : 1200,
           margin: "0 auto",
           width: "100%",
         }}

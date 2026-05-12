@@ -14,12 +14,13 @@
   --write-warning: #d4a017;
   --write-shadow: 0 16px 40px rgba(28, 25, 23, 0.08);
   --write-shadow-soft: 0 8px 20px rgba(28, 25, 23, 0.06);
+  --write-frame-height: clamp(640px, calc(100svh - 128px), 900px);
   position: relative;
   margin-right: 0;
-  padding: 20px 0 32px 0;
+  padding: 14px 0 0;
   min-height: calc(100vh - 7.25rem);
   background:
-    linear-gradient(180deg, color-mix(in oklab, var(--write-surface) 70%, transparent) 0%, transparent 24rem),
+    linear-gradient(180deg, color-mix(in oklab, var(--write-surface) 54%, transparent) 0%, transparent 20rem),
     var(--write-canvas);
   transition: background-color 0.3s ease, color 0.3s ease;
 }
@@ -62,7 +63,8 @@
   flex-direction: row;
   align-items: stretch;
   gap: 18px;
-  min-height: min(78vh, 900px);
+  height: var(--write-frame-height);
+  min-height: 0;
 }
 
 .write-sidenav-toggle {
@@ -604,7 +606,7 @@
   min-width: 0;
   position: relative;
   z-index: 45;
-  align-self: flex-start;
+  align-self: stretch;
 }
 
 .write-left-sidebar.is-open {
@@ -614,12 +616,12 @@
 
 .write-left-inner.card {
   height: 100%;
-  max-height: min(78vh, 900px);
-  padding: 16px 12px 16px 16px !important;
+  max-height: none;
+  padding: 14px 10px 14px 14px !important;
   border: 1px solid var(--write-hairline-soft);
-  background: color-mix(in oklab, var(--write-surface-soft) 50%, var(--write-canvas));
-  box-shadow: var(--write-shadow-soft);
-  border-radius: 16px;
+  background: color-mix(in oklab, var(--write-surface-soft) 38%, var(--write-canvas));
+  box-shadow: none;
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
 }
@@ -628,8 +630,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
+  margin-bottom: 10px;
+  padding: 4px 2px 10px;
   border-bottom: 1px solid var(--write-hairline-soft);
 }
 
@@ -644,7 +646,7 @@
 .write-left-head .btn {
   height: 32px;
   padding: 0 10px;
-  border-radius: 9999px;
+  border-radius: 8px;
   border-color: var(--write-hairline);
   background: var(--write-canvas);
   color: var(--write-accent-active);
@@ -685,7 +687,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding-right: 2px;
+  padding: 2px 4px 0 0;
 }
 
 .chapter-row {
@@ -698,10 +700,10 @@
 .chapter-item {
   flex: 1;
   min-width: 0;
-  min-height: 42px;
+  min-height: 40px;
   text-align: left;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 9px 11px;
+  border-radius: 8px;
   border: 1px solid transparent;
   background: transparent;
   font-size: 0.9rem;
@@ -721,7 +723,7 @@
   background: var(--write-canvas);
   color: var(--write-ink);
   font-weight: 600;
-  box-shadow: 0 1px 0 color-mix(in oklab, var(--write-accent) 20%, transparent) inset;
+  box-shadow: 2px 0 0 var(--write-accent) inset;
 }
 
 .chapter-del {
@@ -761,13 +763,16 @@
 
 .write-editor-card.card {
   position: relative;
-  min-height: min(78vh, 900px);
+  height: 100%;
+  min-height: 0;
   padding: 0;
-  border-radius: 16px;
+  border-radius: 12px;
   border-color: var(--write-hairline-soft);
   background: var(--write-canvas);
   box-shadow: var(--write-shadow-soft);
   overflow: visible;
+  display: flex;
+  flex-direction: column;
 }
 
 .write-editor-card.card:hover {
@@ -776,12 +781,13 @@
 
 .write-editor-header {
   margin: 0;
-  padding: 24px 36px 20px;
+  padding: 22px 36px 18px;
   border-bottom: 1px solid var(--write-hairline-soft);
   background: transparent;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
+  flex: 0 0 auto;
 }
 
 .write-editor-title-row {
@@ -798,8 +804,8 @@
 }
 
 .write-nav-btn {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 8px;
 }
 
@@ -824,7 +830,7 @@
   flex: 1;
   min-width: 0;
   font-family: var(--font-serif);
-  font-size: clamp(1.75rem, 3.2vw, 2.45rem);
+  font-size: clamp(1.72rem, 3vw, 2.35rem);
   font-weight: 400;
   line-height: 1.18;
   letter-spacing: 0;
@@ -1035,7 +1041,10 @@
   display: flex;
   justify-content: center;
   width: 100%;
-  padding: 30px 24px 18px;
+  padding: 30px 24px 20px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .write-body-wrapper--sm .write-body-field {
@@ -1062,10 +1071,14 @@
   width: 100%;
   max-width: min(76ch, 100%);
   margin: 0 !important;
+  min-height: 100%;
+  display: flex;
 }
 
 .write-body-field .textarea.editor-body {
-  min-height: min(66vh, 760px);
+  min-height: 100%;
+  height: 100%;
+  resize: none;
 }
 
 .editor-body {
@@ -1232,11 +1245,12 @@
   justify-content: space-between;
   align-items: center;
   margin: 0;
-  padding: 10px 36px 18px;
+  padding: 9px 36px 12px;
   border-top: 1px solid var(--write-hairline-soft);
   background: transparent;
   font-size: 0.8rem;
-  min-height: 44px;
+  min-height: 40px;
+  flex: 0 0 auto;
 }
 
 .write-word-stats {
@@ -2522,8 +2536,15 @@
 .write-theme--dark .write-left-inner.card {
   background: var(--write-canvas) !important;
   border-color: var(--write-hairline) !important;
+  border-radius: 12px !important;
+}
+
+.write-theme--dark .write-editor-card.card {
   box-shadow: var(--write-shadow-soft) !important;
-  border-radius: 16px !important;
+}
+
+.write-theme--dark .write-left-inner.card {
+  box-shadow: none !important;
 }
 
 .write-theme--dark .chapter-item.active {
