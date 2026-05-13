@@ -377,6 +377,7 @@ def _build_agent_options(novel_id: int, session_id: str = "", user: User | None 
         "max_turns": settings.agent_max_turns,
         "can_use_tool": _can_use_tool,
         "hooks": {"PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])]},
+        "stderr": lambda line: log.warning("Claude CLI stderr: %s", line),
     }
     if env_overrides:
         options_kwargs["env"] = env_overrides
@@ -613,6 +614,15 @@ class ClaudeOrchestrator:
                     log.debug("SDK message type=%s", type(message).__name__)
 
                     if isinstance(message, AssistantMessage):
+                        if getattr(message, "error", None):
+                            err_text = ""
+                            for block in message.content:
+                                if isinstance(block, TextBlock):
+                                    err_text += block.text
+                            err_msg = err_text.strip() or f"Assistant error: {message.error}"
+                            log.warning("SDK AssistantMessage error: %s", err_msg)
+                            yield builder.build_error(err_msg)
+                            break
                         for block in message.content:
                             if isinstance(block, TextBlock):
                                 full_text += block.text
@@ -729,16 +739,25 @@ class ClaudeOrchestrator:
         answer: str,
         selected_option: str | None = None,
     ) -> dict[str, Any]:
-        answer_text = selected_option or answer
         pending = session.pending_question
         session.pending_question = None
 
         answers: dict[str, str] = {}
         if pending and pending.get("questions"):
-            for q in pending["questions"]:
-                q_text = q.get("question", "") if isinstance(q, dict) else ""
-                answers[q_text] = answer_text
+            try:
+                parsed = json.loads(answer)
+            except (TypeError, json.JSONDecodeError):
+                parsed = None
+
+            if isinstance(parsed, dict):
+                answers = {str(k): str(v) for k, v in parsed.items() if str(v).strip()}
+            else:
+                answer_text = selected_option or answer
+                for q in pending["questions"]:
+                    q_text = q.get("question", "") if isinstance(q, dict) else ""
+                    answers[q_text] = answer_text
         else:
+            answer_text = selected_option or answer
             answers[""] = answer_text
 
         resolved = _resolve_user_input(question_id, answers)
