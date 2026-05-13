@@ -79,15 +79,19 @@ def sse_delta(
     delta_type: str = "text",
     content: str = "",
     message_id: str | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> SseEvent:
+    data = {
+        "type": delta_type,
+        "content": content,
+        "message_id": message_id,
+        "ts": time.time(),
+    }
+    if extra:
+        data.update(extra)
     return SseEvent(
         event_type="delta",
-        data={
-            "type": delta_type,
-            "content": content,
-            "message_id": message_id,
-            "ts": time.time(),
-        },
+        data=data,
     )
 
 
@@ -287,8 +291,19 @@ class SseStreamBuilder:
     def build_text_delta(self, content: str) -> SseEvent:
         return sse_delta(delta_type="text", content=content, message_id=self._message_id)
 
-    def build_task_text_delta(self, content: str) -> SseEvent:
-        return sse_delta(delta_type="task_text", content=content, message_id=self._message_id)
+    def build_task_text_delta(
+        self,
+        content: str,
+        *,
+        task_id: str | None = None,
+        task_type: str | None = None,
+    ) -> SseEvent:
+        extra = {}
+        if task_id:
+            extra["task_id"] = task_id
+        if task_type:
+            extra["task_type"] = task_type
+        return sse_delta(delta_type="task_text", content=content, message_id=self._message_id, extra=extra)
 
     def build_thinking_delta(self, content: str) -> SseEvent:
         return sse_delta(delta_type="thinking", content=content, message_id=self._message_id)

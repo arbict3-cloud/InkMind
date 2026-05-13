@@ -12,6 +12,7 @@ Qwen/Minimax/DeepSeek 等模型作为专业执行者，
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -42,6 +43,12 @@ def _clip(s: str | None, n: int) -> str:
     if len(t) <= n:
         return t
     return t[: n - 1] + "…"
+
+
+def _stream_display_pieces(text: str) -> list[str]:
+    if not text:
+        return []
+    return re.findall(r".{1,10}(?:[，。！？；：、,.!?;:]|$)|\s+|.{1,10}", text, flags=re.S)
 
 
 def _strip_code_fence(raw: str) -> str:
@@ -169,6 +176,7 @@ class SubAgentExecutor:
         chunks: Any,
         *,
         json_body_only: bool = False,
+        progress_message: str = "正在生成正文...",
     ) -> str:
         raw_parts: list[str] = []
         body_streamer = _JsonBodyStreamer() if json_body_only else None
@@ -176,8 +184,11 @@ class SubAgentExecutor:
             raw_parts.append(chunk)
             visible = body_streamer.feed(chunk) if body_streamer else chunk
             if visible:
-                task.progress_message = "正在生成正文..."
-                await task.publish_stream_event({"type": "delta", "content": visible})
+                task.progress_message = progress_message
+                for piece in _stream_display_pieces(visible):
+                    await task.publish_stream_event({"type": "delta", "content": piece})
+                    if len(piece) >= 6:
+                        await asyncio.sleep(0.004)
         return "".join(raw_parts)
 
     async def execute_generate_chapter(self, task: AgentTask) -> dict[str, Any]:
@@ -260,7 +271,11 @@ class SubAgentExecutor:
             title=title_display,
             content=chapter_content[:8000],
         )
-        summary = llm.complete(system, user_msg).strip()
+        summary = (await self._collect_streaming_text(
+            task,
+            filter_think_chunks(llm.stream_complete(system, user_msg)),
+            progress_message="正在生成章节摘要...",
+        )).strip()
 
         return {"summary": summary}
 

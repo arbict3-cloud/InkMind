@@ -1221,6 +1221,22 @@ export async function agentAnswerQuestion(
   return data;
 }
 
+export async function updateAgentTaskOutput(
+  novelId: number,
+  sessionId: string,
+  taskId: string,
+  taskType: string,
+  content: string,
+): Promise<{ success: boolean }> {
+  const { data } = await api.post<{ success: boolean }>(`/novels/${novelId}/agent/task-output`, {
+    session_id: sessionId,
+    task_id: taskId,
+    task_type: taskType,
+    content,
+  });
+  return data;
+}
+
 export async function getAgentSession(
   novelId: number,
   sessionId: string

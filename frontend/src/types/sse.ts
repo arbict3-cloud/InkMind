@@ -22,6 +22,8 @@ export interface SseDeltaData {
   type: "text" | "thinking" | "input_json" | "task_text";
   content: string;
   message_id?: string;
+  task_id?: string;
+  task_type?: string;
   ts: number;
 }
 

@@ -98,6 +98,7 @@ class AgentTaskQueue:
         self._queue: asyncio.Queue[AgentTask] = asyncio.Queue(maxsize=max_queue_size)
         self._tasks: dict[str, AgentTask] = {}
         self._handlers: dict[str, TaskHandler] = {}
+        self._submission_subscribers: dict[str, list[asyncio.Queue[AgentTask]]] = {}
         self._workers: list[asyncio.Task] = []
         self._max_workers = max_workers
         self._running = False
@@ -142,6 +143,9 @@ class AgentTaskQueue:
 
         async with self._lock:
             self._tasks[task_id] = task
+            if caller_id:
+                for subscriber in list(self._submission_subscribers.get(caller_id, [])):
+                    await subscriber.put(task)
 
         await self._queue.put(task)
         log.info("Task submitted: %s (type=%s)", task_id, task_type)
@@ -177,6 +181,24 @@ class AgentTaskQueue:
                 task.stream_subscribers.remove(queue)
             except ValueError:
                 pass
+
+    async def subscribe_submissions(self, caller_id: str) -> asyncio.Queue[AgentTask]:
+        queue: asyncio.Queue[AgentTask] = asyncio.Queue()
+        async with self._lock:
+            self._submission_subscribers.setdefault(caller_id, []).append(queue)
+        return queue
+
+    async def unsubscribe_submissions(self, caller_id: str, queue: asyncio.Queue[AgentTask]) -> None:
+        async with self._lock:
+            subscribers = self._submission_subscribers.get(caller_id)
+            if not subscribers:
+                return
+            try:
+                subscribers.remove(queue)
+            except ValueError:
+                pass
+            if not subscribers:
+                self._submission_subscribers.pop(caller_id, None)
 
     async def cancel(self, task_id: str) -> bool:
         async with self._lock:

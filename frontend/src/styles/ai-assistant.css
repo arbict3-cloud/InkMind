@@ -149,7 +149,7 @@
 
 .ai-assistant-panel {
   position: fixed;
-  min-width: 340px;
+  min-width: 380px;
   min-height: 420px;
   max-width: calc(100vw - 36px);
   max-height: calc(100vh - 36px);
@@ -454,7 +454,6 @@ body.ai-assistant-is-dragging {
 
 .agent-message-body h1,
 .agent-message-body h2,
-.agent-message-body h3,
 .agent-message-body h4 {
   margin: 1.05em 0 0.45em;
   font-weight: 600;
@@ -464,8 +463,135 @@ body.ai-assistant-is-dragging {
 
 .agent-message-body h1 { font-size: 1.2em; }
 .agent-message-body h2 { font-size: 1.1em; }
-.agent-message-body h3 { font-size: 1.05em; }
 .agent-message-body h4 { font-size: 1em; }
+
+.agent-message-body h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 1.05em 0 0.65em;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--accent, #cc785c) 10%, var(--canvas, #faf9f5));
+  border: 1px solid color-mix(in oklab, var(--accent, #cc785c) 18%, transparent);
+  color: var(--ink, #141413);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.agent-message-body h3::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #cc785c);
+}
+
+.agent-task-section {
+  margin: 12px 0;
+  border: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 82%, transparent);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--card, #efe9de) 22%, var(--canvas, #faf9f5));
+  overflow: hidden;
+}
+
+.agent-task-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 70%, transparent);
+}
+
+.agent-task-section--collapsed .agent-task-section__header {
+  border-bottom: none;
+}
+
+.agent-task-section__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink, #141413);
+  font: 700 0.84rem/1.3 var(--font-ui);
+  cursor: pointer;
+  padding: 0;
+}
+
+.agent-task-section__chevron {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  color: var(--accent, #cc785c);
+  font-size: 1rem;
+}
+
+.agent-task-section__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  color: var(--muted, #6c6a64);
+  font-size: 0.76rem;
+}
+
+.agent-task-section__meta button,
+.agent-task-section__actions button {
+  border: 1px solid color-mix(in oklab, var(--accent, #cc785c) 24%, var(--border, #e6dfd8));
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--accent, #cc785c) 7%, transparent);
+  color: var(--ink, #141413);
+  font: 600 0.76rem/1 var(--font-ui);
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.agent-task-section__body {
+  padding: 10px 12px 12px;
+}
+
+.agent-task-section__content {
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-serif, var(--font-ui));
+  font-size: 0.93rem;
+  line-height: 1.82;
+  color: var(--ink, #141413);
+  padding-right: 4px;
+}
+
+.agent-task-section__editor {
+  width: 100%;
+  min-height: 320px;
+  max-height: 56vh;
+  resize: vertical;
+  border: 1px solid var(--border, #e6dfd8);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--canvas, #faf9f5) 96%, #fff);
+  color: var(--ink, #141413);
+  padding: 11px 12px;
+  font-family: var(--font-serif, var(--font-ui));
+  font-size: 0.93rem;
+  line-height: 1.82;
+  outline: none;
+}
+
+.agent-task-section__editor:focus {
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 48%, var(--border, #e6dfd8));
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent, #cc785c) 10%, transparent);
+}
+
+.agent-task-section__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
 
 .agent-message-body strong { font-weight: 600; }
 
@@ -1929,6 +2055,38 @@ body.ai-assistant-is-dragging {
 
 .write-theme--dark .agent-message-body,
 .theme--dark .agent-message-body {
+  color: var(--ink, #faf9f5);
+}
+
+.write-theme--dark .agent-message-body h3,
+.theme--dark .agent-message-body h3 {
+  background: color-mix(in oklab, var(--accent, #cc785c) 18%, var(--card, #2a2520));
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 26%, var(--border, #3a3530));
+  color: var(--ink, #faf9f5);
+}
+
+.write-theme--dark .agent-task-section,
+.theme--dark .agent-task-section {
+  background: color-mix(in oklab, var(--card, #2a2520) 72%, transparent);
+  border-color: var(--border, #3a3530);
+}
+
+.write-theme--dark .agent-task-section__header,
+.theme--dark .agent-task-section__header {
+  border-color: var(--border, #3a3530);
+}
+
+.write-theme--dark .agent-task-section__toggle,
+.theme--dark .agent-task-section__toggle,
+.write-theme--dark .agent-task-section__content,
+.theme--dark .agent-task-section__content {
+  color: var(--ink, #faf9f5);
+}
+
+.write-theme--dark .agent-task-section__editor,
+.theme--dark .agent-task-section__editor {
+  background: color-mix(in oklab, var(--card, #2a2520) 92%, #000);
+  border-color: var(--border, #3a3530);
   color: var(--ink, #faf9f5);
 }
 

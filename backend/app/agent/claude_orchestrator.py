@@ -398,6 +398,72 @@ def _build_synthetic_feedback_question(text: str) -> dict[str, Any] | None:
     }
 
 
+def _task_stream_intro(task_type: str) -> str:
+    if task_type == "generate_summary":
+        return "\n\n### 章节摘要\n\n"
+    if task_type == "generate_chapter":
+        return "\n\n### 正文草稿\n\n"
+    if task_type == "revise_chapter":
+        return "\n\n### 改写草稿\n\n"
+    if task_type == "append_chapter":
+        return "\n\n### 续写草稿\n\n"
+    return "\n\n### 生成内容\n\n"
+
+
+def _display_text_chunks(text: str) -> list[str]:
+    if not text:
+        return []
+    chunks = re.findall(r".{1,8}(?:[，。！？；：、,.!?;:]|$)|\s+|.{1,8}", text, flags=re.S)
+    return [chunk for chunk in chunks if chunk]
+
+
+async def _stream_display_text(builder: SseStreamBuilder, text: str) -> AsyncIterator[SseEvent]:
+    chunks = _display_text_chunks(text)
+    for idx, chunk in enumerate(chunks):
+        yield builder.build_text_delta(chunk)
+        if idx < len(chunks) - 1:
+            await asyncio.sleep(0.012)
+
+
+def _extract_completed_task_text(data: dict[str, Any]) -> tuple[str, str, str] | None:
+    if data.get("status") != "completed":
+        return None
+    task_id = str(data.get("task_id") or "")
+    task_type = str(data.get("task_type") or "")
+    result = data.get("result")
+    if not task_id or not task_type or not isinstance(result, dict):
+        return None
+    text = ""
+    if task_type == "generate_summary":
+        text = str(result.get("summary") or "")
+    elif task_type == "generate_chapter":
+        text = str(result.get("body") or "")
+    elif task_type == "revise_chapter":
+        text = str(result.get("revised_content") or "")
+    elif task_type == "append_chapter":
+        text = str(result.get("appended_content") or "")
+    text = text.strip()
+    if not text:
+        return None
+    return task_id, task_type, text
+
+
+async def _stream_task_display_text(
+    builder: SseStreamBuilder,
+    task_id: str,
+    task_type: str,
+    text: str,
+) -> AsyncIterator[SseEvent]:
+    yield builder.build_task_text_delta(
+        _task_stream_intro(task_type),
+        task_id=task_id,
+        task_type=task_type,
+    )
+    for chunk in _display_text_chunks(text):
+        yield builder.build_task_text_delta(chunk, task_id=task_id, task_type=task_type)
+        await asyncio.sleep(0.006)
+
+
 def _build_agent_options(novel_id: int, session_id: str = "", user: User | None = None) -> ClaudeAgentOptions:
     from claude_agent_sdk.types import HookMatcher
     from app.llm.providers import resolve_agent_llm_for_user
@@ -607,8 +673,11 @@ class ClaudeOrchestrator:
             pending_tool_phases: dict[str, str] = {}
             sdk_queue: asyncio.Queue[Any | None] = asyncio.Queue()
             task_stream_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            submission_queue = await self._queue.subscribe_submissions(session.session_id)
             drain_task = asyncio.create_task(_drain_sdk_messages(client, sdk_queue))
             task_stream_tasks: dict[str, asyncio.Task] = {}
+            introduced_task_streams: set[str] = set()
+            displayed_task_results: set[str] = set()
             last_activity_at = time.monotonic()
             waiting_for_user = False
 
@@ -625,19 +694,44 @@ class ClaudeOrchestrator:
                 finally:
                     await self._queue.unsubscribe_stream(task_id, stream)
 
+            async def emit_pending_task_stream_events() -> AsyncIterator[SseEvent]:
+                while not submission_queue.empty():
+                    task = submission_queue.get_nowait()
+                    if (
+                        task.task_id not in task_stream_tasks
+                        and task.task_type in {"generate_summary", "generate_chapter", "revise_chapter", "append_chapter"}
+                    ):
+                        task_stream_tasks[task.task_id] = asyncio.create_task(forward_task_stream(task.task_id))
+
+                while not task_stream_queue.empty():
+                    item = task_stream_queue.get_nowait()
+                    if item.get("type") == "delta":
+                        content = str(item.get("content") or "")
+                        if content:
+                            task_id = str(item.get("task_id") or "")
+                            task_type = str(item.get("task_type") or "")
+                            if task_id and task_id not in introduced_task_streams:
+                                introduced_task_streams.add(task_id)
+                                yield builder.build_task_text_delta(
+                                    _task_stream_intro(task_type),
+                                    task_id=task_id,
+                                    task_type=task_type,
+                                )
+                            yield builder.build_task_text_delta(content, task_id=task_id, task_type=task_type)
+                    elif item.get("type") == "error":
+                        err = str(item.get("error") or "")
+                        if err:
+                            yield builder.build_tool_result_step("sub_agent_stream", err[:200])
+
             try:
                 while True:
-                    while not task_stream_queue.empty():
-                        item = task_stream_queue.get_nowait()
-                        if item.get("type") == "delta":
-                            content = str(item.get("content") or "")
-                            if content:
-                                yield builder.build_task_text_delta(content)
-                                last_activity_at = time.monotonic()
-                        elif item.get("type") == "error":
-                            err = str(item.get("error") or "")
-                            if err:
-                                yield builder.build_tool_result_step("sub_agent_stream", err[:200])
+                    emitted_task_event = False
+                    async for event in emit_pending_task_stream_events():
+                        emitted_task_event = True
+                        last_activity_at = time.monotonic()
+                        yield event
+                    if emitted_task_event:
+                        await asyncio.sleep(0)
 
                     while not session.question_queue.empty():
                         q_event = session.question_queue.get_nowait()
@@ -675,6 +769,10 @@ class ClaudeOrchestrator:
                         continue
 
                     if message is None:
+                        for _ in range(3):
+                            await asyncio.sleep(0)
+                            async for event in emit_pending_task_stream_events():
+                                yield event
                         break
 
                     waiting_for_user = False
@@ -700,7 +798,8 @@ class ClaudeOrchestrator:
                         for block in message.content:
                             if isinstance(block, TextBlock):
                                 full_text += block.text
-                                yield builder.build_text_delta(block.text)
+                                async for event in _stream_display_text(builder, block.text):
+                                    yield event
                             elif isinstance(block, ToolUseBlock):
                                 tool_name = block.name
                                 tool_input = block.input
@@ -760,14 +859,38 @@ class ClaudeOrchestrator:
                                             pass
 
                                     result_tool_name = tracked_tool or f"tool_{tool_use_id[:8]}"
+                                    normalized_result_tool = _normalize_tool_name(result_tool_name)
+                                    result_data = _parse_tool_json(result_text) if preview else None
+                                    if normalized_result_tool == "poll_task_result" and isinstance(result_data, dict):
+                                        completed = _extract_completed_task_text(result_data)
+                                        if completed:
+                                            task_id, task_type, content = completed
+                                            if task_id not in introduced_task_streams and task_id not in displayed_task_results:
+                                                displayed_task_results.add(task_id)
+                                                async for event in _stream_task_display_text(builder, task_id, task_type, content):
+                                                    yield event
+                                    elif normalized_result_tool == "poll_multiple_tasks" and isinstance(result_data, dict):
+                                        items = result_data.get("tasks") or result_data.get("items") or result_data.get("results") or []
+                                        if isinstance(items, list):
+                                            for item in items:
+                                                if not isinstance(item, dict):
+                                                    continue
+                                                completed = _extract_completed_task_text(item)
+                                                if completed:
+                                                    task_id, task_type, content = completed
+                                                    if task_id not in introduced_task_streams and task_id not in displayed_task_results:
+                                                        displayed_task_results.add(task_id)
+                                                        async for event in _stream_task_display_text(builder, task_id, task_type, content):
+                                                            yield event
+
                                     if _normalize_tool_name(result_tool_name) == "dispatch_generation_task" and preview:
-                                        result_data = _parse_tool_json(result_text) or {}
+                                        result_data = result_data or _parse_tool_json(result_text) or {}
                                         task_id = str(result_data.get("task_id") or "")
                                         task_type = str(result_data.get("task_type") or "")
                                         if (
                                             task_id
                                             and task_id not in task_stream_tasks
-                                            and task_type in {"generate_chapter", "revise_chapter", "append_chapter"}
+                                            and task_type in {"generate_summary", "generate_chapter", "revise_chapter", "append_chapter"}
                                         ):
                                             task_stream_tasks[task_id] = asyncio.create_task(forward_task_stream(task_id))
                                     yield builder.build_tool_result_step(
@@ -800,6 +923,7 @@ class ClaudeOrchestrator:
                 drain_task.cancel()
                 for task in task_stream_tasks.values():
                     task.cancel()
+                await self._queue.unsubscribe_submissions(session.session_id, submission_queue)
                 try:
                     await drain_task
                 except asyncio.CancelledError:

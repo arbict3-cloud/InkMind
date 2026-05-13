@@ -33,15 +33,19 @@ log = logging.getLogger(__name__)
 _cv_db_session_factory: contextvars.ContextVar[Any] = contextvars.ContextVar("db_session_factory")
 _cv_novel_id: contextvars.ContextVar[int] = contextvars.ContextVar("novel_id", default=0)
 _cv_session_id: contextvars.ContextVar[str] = contextvars.ContextVar("session_id", default="")
+_SESSION_ID_BY_NOVEL_ID: dict[int, str] = {}
 
 _DEFAULT_TARGET_WORD_COUNT = 1800
 _CONTEXT_PACK_CACHE: dict[str, dict[str, Any]] = {}
+_TASK_OUTPUT_OVERRIDES: dict[str, dict[str, dict[str, str]]] = {}
 
 
 def init_tool_context(db_session_factory: Any, novel_id: int, session_id: str = "") -> None:
     _cv_db_session_factory.set(db_session_factory)
     _cv_novel_id.set(novel_id)
     _cv_session_id.set(session_id)
+    if novel_id and session_id:
+        _SESSION_ID_BY_NOVEL_ID[novel_id] = session_id
 
 
 def _get_db() -> Session:
@@ -56,7 +60,11 @@ def _get_novel_id() -> int:
 
 
 def _get_session_id() -> str:
-    return _cv_session_id.get()
+    session_id = _cv_session_id.get()
+    if session_id:
+        return session_id
+    novel_id = _cv_novel_id.get()
+    return _SESSION_ID_BY_NOVEL_ID.get(novel_id, "")
 
 
 def _get_novel() -> Novel:
@@ -100,6 +108,24 @@ def _context_pack_cache_key() -> str:
 
 def _invalidate_context_pack_cache() -> None:
     _CONTEXT_PACK_CACHE.pop(_context_pack_cache_key(), None)
+
+
+def set_task_output_override(session_id: str, task_id: str, task_type: str, content: str) -> None:
+    if not session_id or not task_id:
+        return
+    _TASK_OUTPUT_OVERRIDES.setdefault(session_id, {})[task_id] = {
+        "task_type": task_type,
+        "content": content,
+    }
+
+
+def _latest_output_override(*task_types: str) -> str | None:
+    session_id = _get_session_id()
+    overrides = _TASK_OUTPUT_OVERRIDES.get(session_id, {})
+    for item in reversed(list(overrides.values())):
+        if item.get("task_type") in task_types and item.get("content", "").strip():
+            return item["content"].strip()
+    return None
 
 
 def _build_writing_context_pack(
@@ -396,8 +422,12 @@ async def get_writing_context_pack(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def quality_check_chapter(args: dict[str, Any]) -> dict[str, Any]:
     title = (args.get("title") or "").strip()
-    content = (args.get("content") or "").strip()
-    summary = (args.get("summary") or "").strip()
+    content = (
+        _latest_output_override("generate_chapter", "revise_chapter", "append_chapter")
+        or args.get("content")
+        or ""
+    ).strip()
+    summary = (_latest_output_override("generate_summary") or args.get("summary") or "").strip()
     target_word_count = _extract_target_word_count(args.get("target_word_count"))
     context_pack = args.get("context_pack") if isinstance(args.get("context_pack"), dict) else {}
     minimum_word_count = int(
@@ -470,7 +500,7 @@ async def dispatch_generation_task(args: dict[str, Any]) -> dict[str, Any]:
             db.close()
 
     queue = get_task_queue()
-    task_id = await queue.submit(task_type=task_type, params=params)
+    task_id = await queue.submit(task_type=task_type, params=params, caller_id=_get_session_id())
 
     result = {
         "task_id": task_id,
@@ -545,8 +575,8 @@ async def save_chapter(args: dict[str, Any]) -> dict[str, Any]:
     db = _get_db()
     novel_id = _get_novel_id()
     title = args["title"]
-    content = args["content"]
-    summary = args.get("summary", "")
+    content = _latest_output_override("generate_chapter", "revise_chapter", "append_chapter") or args["content"]
+    summary = _latest_output_override("generate_summary") or args.get("summary", "")
     sort_order = args.get("sort_order")
 
     if sort_order is None:

@@ -6,6 +6,7 @@ import {
   createAgentSession,
   agentChat,
   agentAnswerQuestion,
+  updateAgentTaskOutput,
   type AgentSession,
 } from "@/api/client";
 import type { PendingQuestionData, SseAgentStepData, SseChapterSavedData } from "@/types/sse";
@@ -20,6 +21,19 @@ interface AgentMessage {
   timestamp: number;
   isStreaming?: boolean;
   savedChapter?: SseChapterSavedData;
+  taskSections?: AgentTaskSection[];
+}
+
+interface AgentTaskSection {
+  taskId: string;
+  taskType: string;
+  title: string;
+  content: string;
+  draftContent?: string;
+  collapsed?: boolean;
+  editing?: boolean;
+  saving?: boolean;
+  saved?: boolean;
 }
 
 export interface AiAssistantFloatingProps {
@@ -31,10 +45,10 @@ const SESSION_KEY = "inkmind_agent_session";
 const PANEL_WIDTH_KEY = "inkmind_ai_panel_width";
 const PANEL_RECT_KEY = "inkmind_ai_panel_rect";
 const ICON_POS_KEY = "inkmind_ai_icon_pos";
-const DEFAULT_PANEL_WIDTH = 400;
-const DEFAULT_PANEL_HEIGHT = 640;
-const MIN_PANEL_WIDTH = 340;
-const MAX_PANEL_WIDTH = 620;
+const DEFAULT_PANEL_WIDTH = 560;
+const DEFAULT_PANEL_HEIGHT = 720;
+const MIN_PANEL_WIDTH = 380;
+const MAX_PANEL_WIDTH = 980;
 const MIN_PANEL_HEIGHT = 420;
 const PANEL_MARGIN = 18;
 
@@ -55,7 +69,7 @@ function saveJson(key: string, value: unknown): void {
 }
 
 function clampPanelWidth(width: number): number {
-  const viewportMax = typeof window === "undefined" ? MAX_PANEL_WIDTH : window.innerWidth - 120;
+  const viewportMax = typeof window === "undefined" ? MAX_PANEL_WIDTH : window.innerWidth - 72;
   const maxWidth = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, viewportMax));
   return Math.min(maxWidth, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
 }
@@ -112,6 +126,18 @@ function stopStreamingMessages(messages: AgentMessage[]): AgentMessage[] {
       ? { ...message, isStreaming: false }
       : message
   ));
+}
+
+function taskSectionTitle(taskType: string): string {
+  if (taskType === "generate_summary") return "agent_task_section_summary";
+  if (taskType === "generate_chapter") return "agent_task_section_chapter";
+  if (taskType === "revise_chapter") return "agent_task_section_revise";
+  if (taskType === "append_chapter") return "agent_task_section_append";
+  return "agent_task_section_content";
+}
+
+function isTaskIntroChunk(content: string): boolean {
+  return /^\s*#{1,4}\s*(章节摘要|正文草稿|改写草稿|续写草稿|生成内容)\s*$/m.test(content);
 }
 
 function sanitizeAssistantContent(content: string): string {
@@ -354,7 +380,35 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         }
       },
       onDelta: (data: any) => {
-        if ((data.type === "text" || data.type === "task_text") && data.content) {
+        if (data.type === "task_text" && data.content) {
+          const currentAid = activeAssistantIdRef.current;
+          const taskId = data.task_id || "task";
+          const taskType = data.task_type || "content";
+          const chunk = isTaskIntroChunk(data.content) ? "" : data.content;
+          setMessages((prev) => prev.map((m) => {
+            if (m.id !== currentAid) return m;
+            const sections = [...(m.taskSections || [])];
+            const idx = sections.findIndex((section) => section.taskId === taskId);
+            if (idx >= 0) {
+              const current = sections[idx];
+              sections[idx] = {
+                ...current,
+                content: current.content + chunk,
+                draftContent: current.editing ? current.draftContent : undefined,
+                saved: false,
+              };
+            } else {
+              sections.push({
+                taskId,
+                taskType,
+                title: taskSectionTitle(taskType),
+                content: chunk,
+                collapsed: false,
+              });
+            }
+            return { ...m, taskSections: sections };
+          }));
+        } else if (data.type === "text" && data.content) {
           const currentAid = activeAssistantIdRef.current;
           setMessages((prev) => prev.map((m) => m.id === currentAid ? { ...m, content: m.content + data.content } : m));
         }
@@ -490,6 +544,74 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     window.dispatchEvent(new CustomEvent("inkmind:chapter-saved", { detail: chapter }));
   }, []);
 
+  const updateTaskSection = useCallback((
+    messageId: string,
+    taskId: string,
+    updater: (section: AgentTaskSection) => AgentTaskSection,
+  ) => {
+    setMessages((prev) => prev.map((message) => {
+      if (message.id !== messageId || !message.taskSections) return message;
+      return {
+        ...message,
+        taskSections: message.taskSections.map((section) => (
+          section.taskId === taskId ? updater(section) : section
+        )),
+      };
+    }));
+  }, []);
+
+  const handleToggleTaskSection = useCallback((messageId: string, taskId: string) => {
+    updateTaskSection(messageId, taskId, (section) => ({ ...section, collapsed: !section.collapsed }));
+  }, [updateTaskSection]);
+
+  const handleEditTaskSection = useCallback((messageId: string, taskId: string) => {
+    updateTaskSection(messageId, taskId, (section) => ({
+      ...section,
+      editing: true,
+      collapsed: false,
+      draftContent: section.content,
+      saved: false,
+    }));
+  }, [updateTaskSection]);
+
+  const handleCancelTaskSectionEdit = useCallback((messageId: string, taskId: string) => {
+    updateTaskSection(messageId, taskId, (section) => ({
+      ...section,
+      editing: false,
+      draftContent: undefined,
+      saving: false,
+    }));
+  }, [updateTaskSection]);
+
+  const handleTaskSectionDraftChange = useCallback((messageId: string, taskId: string, value: string) => {
+    updateTaskSection(messageId, taskId, (section) => ({ ...section, draftContent: value, saved: false }));
+  }, [updateTaskSection]);
+
+  const handleApplyTaskSectionEdit = useCallback(async (messageId: string, section: AgentTaskSection) => {
+    if (!novelId || !session) return;
+    const content = (section.draftContent ?? section.content).trim();
+    updateTaskSection(messageId, section.taskId, (current) => ({ ...current, saving: true }));
+    try {
+      await updateAgentTaskOutput(novelId, session.session_id, section.taskId, section.taskType, content);
+      updateTaskSection(messageId, section.taskId, (current) => ({
+        ...current,
+        content,
+        draftContent: undefined,
+        editing: false,
+        saving: false,
+        saved: true,
+      }));
+    } catch (err) {
+      updateTaskSection(messageId, section.taskId, (current) => ({ ...current, saving: false }));
+      setMessages((prev) => [...prev, {
+        id: generateId(),
+        role: "error",
+        content: err instanceof Error ? err.message : t("agent_task_section_apply_failed"),
+        timestamp: Date.now(),
+      }]);
+    }
+  }, [novelId, session, t, updateTaskSection]);
+
   const handleContinueAfterSaved = useCallback(() => {
     setInput(t("smart_writer_suggestion_1"));
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -583,7 +705,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
               </div>
             )}
             {messages.map((msg) => {
-              if (msg.role === "assistant" && msg.isStreaming && !msg.content.trim()) {
+              if (msg.role === "assistant" && msg.isStreaming && !msg.content.trim() && !(msg.taskSections?.length)) {
                 return null;
               }
               return (
@@ -622,10 +744,66 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
                     <div className="agent-message-avatar">
                       <AiAssistantMark className="ai-assistant-mark--avatar" />
                     </div>
-                    <div className="agent-message-body">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeAssistantContent(msg.content)}</ReactMarkdown>
-                      {msg.isStreaming && msg.content.trim() && <span className="agent-cursor" aria-hidden="true" />}
-                    </div>
+	                    <div className="agent-message-body">
+	                      {msg.content.trim() && (
+	                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeAssistantContent(msg.content)}</ReactMarkdown>
+	                      )}
+	                      {msg.taskSections?.map((section) => (
+	                        <div key={section.taskId} className={`agent-task-section${section.collapsed ? " agent-task-section--collapsed" : ""}`}>
+	                          <div className="agent-task-section__header">
+	                            <button
+	                              type="button"
+	                              className="agent-task-section__toggle"
+	                              onClick={() => handleToggleTaskSection(msg.id, section.taskId)}
+	                            >
+	                              <span className="agent-task-section__chevron">{section.collapsed ? "›" : "⌄"}</span>
+	                              <span>{t(section.title)}</span>
+	                            </button>
+	                            <div className="agent-task-section__meta">
+	                              <span>{t("agent_task_section_word_count").replace("{count}", String(section.content.length))}</span>
+	                              {section.saved && <span>{t("agent_task_section_applied")}</span>}
+	                              <button type="button" onClick={() => handleEditTaskSection(msg.id, section.taskId)}>
+	                                {t("common_edit")}
+	                              </button>
+	                            </div>
+	                          </div>
+	                          {!section.collapsed && (
+	                            <div className="agent-task-section__body">
+	                              {section.editing ? (
+	                                <>
+	                                  <textarea
+	                                    className="agent-task-section__editor"
+	                                    value={section.draftContent ?? section.content}
+	                                    onChange={(event) => handleTaskSectionDraftChange(msg.id, section.taskId, event.target.value)}
+	                                  />
+	                                  <div className="agent-task-section__actions">
+	                                    <button
+	                                      type="button"
+	                                      onClick={() => handleApplyTaskSectionEdit(msg.id, section)}
+	                                      disabled={section.saving}
+	                                    >
+	                                      {section.saving ? t("agent_task_section_applying") : t("agent_task_section_apply")}
+	                                    </button>
+	                                    <button
+	                                      type="button"
+	                                      onClick={() => handleCancelTaskSectionEdit(msg.id, section.taskId)}
+	                                      disabled={section.saving}
+	                                    >
+	                                      {t("smart_writer_action_cancel")}
+	                                    </button>
+	                                  </div>
+	                                </>
+	                              ) : (
+	                                <div className="agent-task-section__content">
+	                                  {section.content || (msg.isStreaming ? t("agent_task_section_generating") : "")}
+	                                </div>
+	                              )}
+	                            </div>
+	                          )}
+	                        </div>
+	                      ))}
+	                      {msg.isStreaming && msg.content.trim() && <span className="agent-cursor" aria-hidden="true" />}
+	                    </div>
                   </div>
                 )}
               </div>
