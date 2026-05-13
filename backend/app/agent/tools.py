@@ -202,45 +202,6 @@ class GenerateChapterTool(BaseTool):
         return self._llm.stream_complete(system, user, max_tokens=max_tokens)
 
 
-def build_generation_prompt(
-    novel: Novel,
-    chapter_summary: str,
-    context: str,
-    *,
-    fixed_title: str | None = None,
-    word_count: int | None = None,
-) -> tuple[str, str]:
-    """构建章节生成的 system prompt 和 user prompt（供 GenerateChapterTool 内部调用）。"""
-    
-    word_count_req = ""
-    if word_count and 500 <= word_count <= 4000:
-        word_count_req = f"\n5. 正文长度尽量控制在 {word_count} 字左右（允许上下浮动 10%）。"
-    
-    if fixed_title:
-        system = f"""你是一位专业中文小说作者。请根据上下文，创作本章正文。
-要求：
-1. 使用自然流畅的现代汉语叙事，符合给定文风与类型。
-2. 只输出一个 JSON 对象（UTF-8），不要 markdown 代码块以外的解释文字。
-3. JSON 只能有一个键 body，值为字符串：本章完整正文。
-4. 正文中不要写章节标题、章节号或「本章」等结构标签。{word_count_req}"""
-        title_line = f"\n【本章标题（已定，勿写入正文）】{fixed_title.strip()}"
-    else:
-        system = f"""你是一位专业中文小说作者。请根据上下文，创作本章。
-要求：
-1. 使用自然流畅的现代汉语叙事，符合给定文风与类型。
-2. 只输出一个 JSON 对象（UTF-8），不要 markdown 代码块以外的解释文字。
-3. JSON 必须包含两个字符串键：title（章节标题，不超过15字，勿加书名号）与 body（本章完整正文）。
-4. 正文中不要写章节标题行、章节号或「本章」等结构标签。{word_count_req}"""
-        title_line = ""
-
-    user = f"""{context}
-{title_line}
-
-请严格按 system 要求的 JSON 结构输出。"""
-
-    return system, user
-
-
 class FinishTool(BaseTool):
     """完成任务工具。让模型自己决定何时完成任务。"""
 

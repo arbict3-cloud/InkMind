@@ -10,7 +10,6 @@ from app.agent.tools import (
     GetCharacterProfilesTool,
     GetNovelContextTool,
     GetPreviousChaptersTool,
-    build_generation_prompt,
 )
 
 __all__ = [
@@ -21,5 +20,4 @@ __all__ = [
     "GetCharacterProfilesTool",
     "GetNovelContextTool",
     "GenerateChapterTool",
-    "build_generation_prompt",
 ]

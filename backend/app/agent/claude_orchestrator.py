@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -87,6 +88,7 @@ _ORCHESTRATOR_SYSTEM_PROMPT = """你是 InkMind 的 AI 创作总监（项目总�
 - 先了解项目状态，再制定计划，最后执行
 - 主动向用户确认关键决策（风格、方向、字数等）
 - 生成任务提交后，轮询等待结果，然后向用户汇报
+- 生成正文任务会由系统实时流式展示给用户；拿到任务结果后不要再把完整正文重复粘贴给用户，只需继续质检、保存或简短说明
 - 用中文与用户交流
 - **引用章节时务必使用 chapter_number 字段**（如"第3章"），不要使用 id 或 sort_order
 - 不要向用户展示数据库章节 ID，例如"章节 ID: 51"。需要说明章节位置时，只说"第 N 章"或章节标题。
@@ -115,6 +117,8 @@ WritingContextPack 在同一次写作任务后续步骤中应复用，不要重�
 - 需要用户确认时（如"是否继续？"），必须用 AskUserQuestion 工具
 - 需要用户补充信息时，必须用 AskUserQuestion 工具
 - 你的文本回复只用于陈述信息、汇报结果、解释情况，不用于呈现交互选项
+- 如果回复中出现任何面向用户的问句，例如"你觉得这个方向如何？"、"是否继续？"、"要不要调整？"、"如果有其他想法也可以调整"，必须改用 AskUserQuestion 工具，并至少提供 2 个按钮选项
+- 禁止在普通文本回复末尾追加开放式确认句；需要反馈时必须让 UI 展示按钮
 
 AskUserQuestion 的正确用法：
 - question: 要问用户的问题（如"你希望怎样处理？"）
@@ -351,6 +355,49 @@ async def _pre_tool_use_hook(
     return {"continue_": True}
 
 
+_FEEDBACK_QUESTION_RE = re.compile(
+    r"(你觉得|您觉得|是否|要不要|需不需要|是否继续|是否保存|希望.*吗|可以调整|其他想法|方向如何|确认|继续|调整)"
+)
+
+
+def _build_synthetic_feedback_question(text: str) -> dict[str, Any] | None:
+    normalized = text.strip()
+    if not normalized:
+        return None
+    tail = normalized[-180:]
+    if "?" not in tail and "？" not in tail and not _FEEDBACK_QUESTION_RE.search(tail):
+        return None
+    if not _FEEDBACK_QUESTION_RE.search(tail):
+        return None
+    question = tail
+    sentence_parts = re.split(r"(?<=[。！？!?])", tail)
+    if sentence_parts:
+        question = "".join(sentence_parts[-2:]).strip() or tail
+    return {
+        "type": "ask_user_question",
+        "question_id": f"synthetic_{uuid.uuid4().hex[:12]}",
+        "session_id": "",
+        "synthetic": True,
+        "questions": [
+            {
+                "question": question,
+                "header": "继续方向",
+                "options": [
+                    {"label": "按此继续", "description": "认可当前方向，让 AI 继续推进"},
+                    {"label": "调整方向", "description": "补充你的想法后再继续"},
+                ],
+            }
+        ],
+        "question": question,
+        "options": [
+            {"label": "按此继续", "description": "认可当前方向，让 AI 继续推进"},
+            {"label": "调整方向", "description": "补充你的想法后再继续"},
+        ],
+        "header": "继续方向",
+        "multi_select": False,
+    }
+
+
 def _build_agent_options(novel_id: int, session_id: str = "", user: User | None = None) -> ClaudeAgentOptions:
     from claude_agent_sdk.types import HookMatcher
     from app.llm.providers import resolve_agent_llm_for_user
@@ -559,12 +606,39 @@ class ClaudeOrchestrator:
             pending_tool_calls: dict[str, str] = {}
             pending_tool_phases: dict[str, str] = {}
             sdk_queue: asyncio.Queue[Any | None] = asyncio.Queue()
+            task_stream_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
             drain_task = asyncio.create_task(_drain_sdk_messages(client, sdk_queue))
+            task_stream_tasks: dict[str, asyncio.Task] = {}
             last_activity_at = time.monotonic()
             waiting_for_user = False
 
+            async def forward_task_stream(task_id: str) -> None:
+                stream = await self._queue.subscribe_stream(task_id)
+                if stream is None:
+                    return
+                try:
+                    while True:
+                        item = await stream.get()
+                        if item.get("type") == "closed":
+                            break
+                        await task_stream_queue.put(item)
+                finally:
+                    await self._queue.unsubscribe_stream(task_id, stream)
+
             try:
                 while True:
+                    while not task_stream_queue.empty():
+                        item = task_stream_queue.get_nowait()
+                        if item.get("type") == "delta":
+                            content = str(item.get("content") or "")
+                            if content:
+                                yield builder.build_task_text_delta(content)
+                                last_activity_at = time.monotonic()
+                        elif item.get("type") == "error":
+                            err = str(item.get("error") or "")
+                            if err:
+                                yield builder.build_tool_result_step("sub_agent_stream", err[:200])
+
                     while not session.question_queue.empty():
                         q_event = session.question_queue.get_nowait()
                         if q_event and q_event.get("type") == "ask_user_question":
@@ -590,7 +664,7 @@ class ClaudeOrchestrator:
                             yield builder.build_status("waiting_for_user")
 
                     try:
-                        message = await asyncio.wait_for(sdk_queue.get(), timeout=0.3)
+                        message = await asyncio.wait_for(sdk_queue.get(), timeout=0.1)
                     except asyncio.TimeoutError:
                         if (
                             not waiting_for_user
@@ -686,6 +760,16 @@ class ClaudeOrchestrator:
                                             pass
 
                                     result_tool_name = tracked_tool or f"tool_{tool_use_id[:8]}"
+                                    if _normalize_tool_name(result_tool_name) == "dispatch_generation_task" and preview:
+                                        result_data = _parse_tool_json(result_text) or {}
+                                        task_id = str(result_data.get("task_id") or "")
+                                        task_type = str(result_data.get("task_type") or "")
+                                        if (
+                                            task_id
+                                            and task_id not in task_stream_tasks
+                                            and task_type in {"generate_chapter", "revise_chapter", "append_chapter"}
+                                        ):
+                                            task_stream_tasks[task_id] = asyncio.create_task(forward_task_stream(task_id))
                                     yield builder.build_tool_result_step(
                                         tool_name=result_tool_name,
                                         result_preview=preview,
@@ -714,10 +798,36 @@ class ClaudeOrchestrator:
 
             finally:
                 drain_task.cancel()
+                for task in task_stream_tasks.values():
+                    task.cancel()
                 try:
                     await drain_task
                 except asyncio.CancelledError:
                     pass
+                for task in task_stream_tasks.values():
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+            synthetic_question = None
+            if session.pending_question is None:
+                synthetic_question = _build_synthetic_feedback_question(full_text)
+            if synthetic_question:
+                self._record_orchestrator_usage(session, user_message, full_text)
+                session.pending_question = synthetic_question
+                yield builder.build_question(
+                    synthetic_question.get("question", ""),
+                    question_id=synthetic_question.get("question_id"),
+                    options=synthetic_question.get("options"),
+                    header=synthetic_question.get("header"),
+                    allow_custom=True,
+                    multi_select=False,
+                    questions=synthetic_question.get("questions"),
+                )
+                yield builder.build_status("waiting_for_user")
+                yield builder.build_done()
+                return
 
             self._record_orchestrator_usage(session, user_message, full_text)
             yield builder.build_status("idle")
@@ -741,6 +851,7 @@ class ClaudeOrchestrator:
     ) -> dict[str, Any]:
         pending = session.pending_question
         session.pending_question = None
+        is_synthetic = bool(pending and pending.get("synthetic"))
 
         answers: dict[str, str] = {}
         if pending and pending.get("questions"):
@@ -760,12 +871,12 @@ class ClaudeOrchestrator:
             answer_text = selected_option or answer
             answers[""] = answer_text
 
-        resolved = _resolve_user_input(question_id, answers)
+        resolved = False if is_synthetic else _resolve_user_input(question_id, answers)
         if not resolved:
             _cancel_pending_questions(session, "问题已过期")
 
         session.touch()
-        return {"status": "ok", "resolved": resolved}
+        return {"status": "ok", "resolved": resolved, "synthetic": is_synthetic}
 
     async def close_session(self, session: OrchestratorSession) -> None:
         _cancel_pending_questions(session, "会话已关闭")

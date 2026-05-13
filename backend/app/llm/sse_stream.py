@@ -287,6 +287,9 @@ class SseStreamBuilder:
     def build_text_delta(self, content: str) -> SseEvent:
         return sse_delta(delta_type="text", content=content, message_id=self._message_id)
 
+    def build_task_text_delta(self, content: str) -> SseEvent:
+        return sse_delta(delta_type="task_text", content=content, message_id=self._message_id)
+
     def build_thinking_delta(self, content: str) -> SseEvent:
         return sse_delta(delta_type="thinking", content=content, message_id=self._message_id)
 

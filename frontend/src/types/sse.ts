@@ -19,7 +19,7 @@ export interface SsePatchData {
 }
 
 export interface SseDeltaData {
-  type: "text" | "thinking" | "input_json";
+  type: "text" | "thinking" | "input_json" | "task_text";
   content: string;
   message_id?: string;
   ts: number;

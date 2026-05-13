@@ -354,7 +354,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         }
       },
       onDelta: (data: any) => {
-        if (data.type === "text" && data.content) {
+        if ((data.type === "text" || data.type === "task_text") && data.content) {
           const currentAid = activeAssistantIdRef.current;
           setMessages((prev) => prev.map((m) => m.id === currentAid ? { ...m, content: m.content + data.content } : m));
         }
@@ -471,12 +471,16 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     ]);
 
     try {
-      await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption);
+      const result = await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption);
+      if (!result.resolved) {
+        const handlers = buildChatHandlers(newAid);
+        await agentChat(novelId!, session.session_id, answerText, handlers);
+      }
     } catch (err) {
       setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
       setIsLoading(false);
     }
-  }, [session, pendingQuestion, novelId]);
+  }, [session, pendingQuestion, novelId, buildChatHandlers]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
