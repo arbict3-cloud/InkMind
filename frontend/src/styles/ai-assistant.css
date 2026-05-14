@@ -576,6 +576,10 @@ body.ai-assistant-is-dragging {
   margin-top: 8px;
 }
 
+.agent-message-post-task {
+  margin-top: 10px;
+}
+
 .agent-message-body strong { font-weight: 600; }
 
 .agent-message-body em { font-style: italic; }

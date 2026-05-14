@@ -811,6 +811,7 @@ class ClaudeOrchestrator:
                     except asyncio.TimeoutError:
                         if (
                             not waiting_for_user
+                            and session.pending_question is None
                             and time.monotonic() - last_activity_at > _SDK_IDLE_TIMEOUT_SECONDS
                         ):
                             yield builder.build_error("Agent 长时间没有返回响应，请稍后重试。")
@@ -824,7 +825,7 @@ class ClaudeOrchestrator:
                                 yield event
                         break
 
-                    waiting_for_user = False
+                    waiting_for_user = session.pending_question is not None
                     last_activity_at = time.monotonic()
                     session.touch()
 

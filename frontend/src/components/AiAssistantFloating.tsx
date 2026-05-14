@@ -19,6 +19,7 @@ interface AgentMessage {
   id: string;
   role: "user" | "assistant" | "system" | "error" | "chapter_saved";
   content: string;
+  postTaskContent?: string;
   timestamp: number;
   isStreaming?: boolean;
   savedChapter?: SseChapterSavedData;
@@ -565,7 +566,13 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
           }));
         } else if (data.type === "text" && data.content) {
           const currentAid = activeAssistantIdRef.current;
-          setMessages((prev) => prev.map((m) => m.id === currentAid ? { ...m, content: m.content + data.content } : m));
+          setMessages((prev) => prev.map((m) => {
+            if (m.id !== currentAid) return m;
+            if (m.taskSections?.length) {
+              return { ...m, postTaskContent: (m.postTaskContent || "") + data.content };
+            }
+            return { ...m, content: m.content + data.content };
+          }));
         }
       },
       onAgentStep: (data: any) => {
@@ -955,7 +962,10 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
               </div>
             )}
             {messages.map((msg) => {
-              const isEmptyAssistant = msg.role === "assistant" && !msg.content.trim() && !(msg.taskSections?.length);
+              const isEmptyAssistant = msg.role === "assistant"
+                && !msg.content.trim()
+                && !msg.postTaskContent?.trim()
+                && !(msg.taskSections?.length);
               const showAssistantActivity = msg.role === "assistant" && msg.isStreaming && isLoading && !pendingQuestion;
               if (isEmptyAssistant && !msg.isStreaming) {
                 return null;
@@ -1056,6 +1066,11 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 	                          )}
 	                        </div>
 	                      ))}
+                        {msg.postTaskContent?.trim() && (
+                          <div className="agent-message-post-task">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeAssistantContent(msg.postTaskContent)}</ReactMarkdown>
+                          </div>
+                        )}
                         {!isEmptyAssistant && showAssistantActivity && (
                           <AgentActivityIndicator label={activityLabel} />
                         )}
