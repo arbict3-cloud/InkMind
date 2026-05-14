@@ -498,6 +498,20 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   }, []);
 
   useEffect(() => {
+    const handleOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ novelId?: number; prompt?: string }>).detail;
+      if (detail?.novelId && novelId && detail.novelId !== novelId) return;
+      setIsOpen(true);
+      if (detail?.prompt) {
+        setInput(detail.prompt);
+      }
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+    };
+    window.addEventListener("inkmind:assistant-open", handleOpen);
+    return () => window.removeEventListener("inkmind:assistant-open", handleOpen);
+  }, [novelId]);
+
+  useEffect(() => {
     if (!isOpen || !novelId || initializedRef.current) return;
     initializedRef.current = true;
     const stored = loadJson<{ session_id: string; novel_id: number } | null>(`${SESSION_KEY}_${novelId}`, null);
@@ -872,6 +886,12 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [t]);
 
+  const handleSuggestionClick = useCallback((prompt: string) => {
+    if (isLoading) return;
+    setInput(prompt);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, [isLoading]);
+
   const handlePanelResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>, mode: PanelResizeMode) => {
     event.preventDefault();
     event.stopPropagation();
@@ -958,7 +978,29 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
             {messages.length === 0 && (
               <div className="agent-welcome">
                 <div className="agent-welcome__icon"><AiAssistantMark /></div>
-                <p className="agent-welcome__text">{t("smart_writer_welcome")}</p>
+                <div className="agent-welcome__copy">
+                  <p className="agent-welcome__eyebrow">{t("smart_writer_welcome_eyebrow")}</p>
+                  <p className="agent-welcome__title">{t("smart_writer_welcome_title")}</p>
+                  <p className="agent-welcome__text">{t("smart_writer_welcome")}</p>
+                </div>
+                <div className="agent-welcome__actions" aria-label={t("smart_writer_recommended_actions")}>
+                  {[
+                    t("smart_writer_suggestion_1"),
+                    t("smart_writer_suggestion_2"),
+                    t("smart_writer_suggestion_check"),
+                    t("smart_writer_suggestion_character"),
+                  ].map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      className="agent-welcome__action"
+                      disabled={isLoading}
+                      onClick={() => handleSuggestionClick(prompt)}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {messages.map((msg) => {

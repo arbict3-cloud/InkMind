@@ -344,7 +344,7 @@ body.ai-assistant-is-dragging {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 54px 28px;
+  padding: 42px 24px;
   text-align: center;
 }
 
@@ -358,12 +358,74 @@ body.ai-assistant-is-dragging {
   background: color-mix(in oklab, var(--accent, #cc785c) 8%, transparent);
 }
 
+.agent-welcome__copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-welcome__eyebrow {
+  margin: 0;
+  color: var(--accent, #cc785c);
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.agent-welcome__title {
+  margin: 0;
+  max-width: 300px;
+  color: var(--ink, #141413);
+  font-family: var(--font-ui);
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .agent-welcome__text {
+  margin: 0;
   font-size: 0.86rem;
   color: var(--muted, #6c6a64);
   line-height: 1.6;
-  max-width: 260px;
+  max-width: 292px;
   font-family: var(--font-ui);
+}
+
+.agent-welcome__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: min(100%, 320px);
+  margin-top: 6px;
+}
+
+.agent-welcome__action {
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 82%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--canvas, #faf9f5) 72%, var(--card, #efe9de));
+  color: var(--ink, #141413);
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.agent-welcome__action:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 24%, transparent);
+  background: color-mix(in oklab, var(--accent, #cc785c) 10%, var(--canvas, #faf9f5));
+  color: var(--accent-active, #a9583e);
+}
+
+.agent-welcome__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .agent-message {
@@ -1041,6 +1103,28 @@ body.ai-assistant-is-dragging {
   color: var(--muted, #a09d96);
 }
 
+.write-theme--dark .agent-welcome__title,
+.theme--dark .agent-welcome__title,
+[data-theme="dark"] .agent-welcome__title {
+  color: var(--ink, #faf9f5);
+}
+
+.write-theme--dark .agent-welcome__action,
+.theme--dark .agent-welcome__action,
+[data-theme="dark"] .agent-welcome__action {
+  background: color-mix(in oklab, var(--card, #2a2520) 70%, transparent);
+  border-color: var(--border, #3a3530);
+  color: var(--ink, #faf9f5);
+}
+
+.write-theme--dark .agent-welcome__action:hover:not(:disabled),
+.theme--dark .agent-welcome__action:hover:not(:disabled),
+[data-theme="dark"] .agent-welcome__action:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent, #cc785c) 16%, var(--card, #2a2520));
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 32%, transparent);
+  color: var(--accent, #cc785c);
+}
+
 [data-theme="dark"] .agent-input-container,
 .theme--dark .agent-input-container,
 .write-theme--dark .agent-input-container {
@@ -1633,6 +1717,14 @@ body.ai-assistant-is-dragging {
 
   .ai-assistant-float-btn__label {
     display: none;
+  }
+
+  .agent-welcome {
+    padding: 34px 18px;
+  }
+
+  .agent-welcome__actions {
+    grid-template-columns: 1fr;
   }
 
   .ai-assistant-question__custom {
