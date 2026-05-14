@@ -10,7 +10,6 @@ import {
   createBatchBackgroundTask,
   deleteChapter,
   chapterSelectionAi,
-  createCharacter,
   createMemo,
   evaluateChapter,
   fetchChapterVersions,
@@ -546,28 +545,6 @@ export default function NovelWrite() {
     setSelectionPanel(null);
     setSelectionRange(null);
     setSelectionMenuPos(null);
-  }
-
-  async function addSelectionToCharacter() {
-    const r = selectionRange ?? captureSelection();
-    if (!r || activeId === null) return;
-    const selected = content.slice(r.start, r.end).trim();
-    if (!selected) {
-      setErr(t("write_err_select_text"));
-      return;
-    }
-    const firstLine = selected.split(/\s|\n|，|。|,|\./).find(Boolean) || selected.slice(0, 16);
-    try {
-      await createCharacter(id, {
-        name: firstLine.slice(0, 24),
-        profile: selected,
-        notes: t("write_selection_from_chapter").replace("{title}", title || t("common_untitled")),
-      });
-      setSelectionRange(null);
-      setSelectionMenuPos(null);
-    } catch (e) {
-      setErr(apiErrorMessage(e));
-    }
   }
 
   async function addSelectionToMemo() {
@@ -2133,7 +2110,6 @@ export default function NovelWrite() {
           left={selectionMenuPos.left}
           busy={busy}
           onRunAi={(mode) => void runSelectionAi(mode)}
-          onAddToCharacter={() => void addSelectionToCharacter()}
           onAddToMemo={() => void addSelectionToMemo()}
         />
       ) : null}

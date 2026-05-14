@@ -7,7 +7,6 @@ interface SelectionFloatMenuProps {
   left: number;
   busy: boolean;
   onRunAi: (mode: SelectionAiMode) => void;
-  onAddToCharacter: () => void;
   onAddToMemo: () => void;
 }
 
@@ -16,7 +15,6 @@ function SelectionFloatMenu({
   left,
   busy,
   onRunAi,
-  onAddToCharacter,
   onAddToMemo,
 }: SelectionFloatMenuProps) {
   const { t } = useI18n();
@@ -36,12 +34,6 @@ function SelectionFloatMenu({
       </button>
       <button type="button" className="write-selection-float__item" disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void onRunAi("polish")}>
         {t("write_selection_polish")}
-      </button>
-      <button type="button" className="write-selection-float__item" disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void onRunAi("append")}>
-        {t("write_selection_append")}
-      </button>
-      <button type="button" className="write-selection-float__item" disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void onAddToCharacter()}>
-        {t("write_selection_to_character")}
       </button>
       <button type="button" className="write-selection-float__item" disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void onAddToMemo()}>
         {t("write_selection_to_memo")}
