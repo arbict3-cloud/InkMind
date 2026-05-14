@@ -183,6 +183,33 @@ _pending_user_input_answers: dict[str, dict[str, str]] = {}
 _cleanup_task: asyncio.Task | None = None
 
 
+async def _disconnect_session_client(session: OrchestratorSession) -> None:
+    if session.sdk_client is not None:
+        try:
+            await session.sdk_client.disconnect()
+        except Exception as e:
+            log.warning("Failed to disconnect SDK client: %s", e)
+        session.sdk_client = None
+
+
+async def interrupt_orchestrator_session(session: OrchestratorSession, reason: str = "任务已中断") -> None:
+    _cancel_pending_questions(session, reason)
+    queue = get_task_queue()
+    for task_id in list(session.pending_task_ids):
+        try:
+            await queue.cancel(task_id)
+        except Exception:
+            log.exception("cancel pending task failed task_id=%s", task_id)
+    session.pending_task_ids.clear()
+    await _disconnect_session_client(session)
+    session.touch()
+
+
+async def close_orchestrator_session(session: OrchestratorSession, reason: str = "会话已关闭") -> None:
+    await interrupt_orchestrator_session(session, reason)
+    _active_sessions.pop(session.session_id, None)
+
+
 async def _cleanup_loop() -> None:
     while True:
         await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
@@ -253,7 +280,27 @@ async def _can_use_tool(
         _pending_user_input_events[question_id] = event
 
         questions = input_data.get("questions", [])
-        first_q = questions[0] if questions else {}
+        if not isinstance(questions, list):
+            questions = []
+        first_q = questions[0] if questions and isinstance(questions[0], dict) else {}
+
+        def normalize_options(raw: Any) -> list[dict[str, str]]:
+            if not isinstance(raw, list):
+                return []
+            normalized: list[dict[str, str]] = []
+            for item in raw:
+                if isinstance(item, str):
+                    label = item.strip()
+                    if label:
+                        normalized.append({"label": label, "description": ""})
+                elif isinstance(item, dict):
+                    label = str(item.get("label") or "").strip()
+                    if label:
+                        normalized.append({
+                            "label": label,
+                            "description": str(item.get("description") or ""),
+                        })
+            return normalized
 
         session_id = ""
         for sid, sess in _active_sessions.items():
@@ -267,7 +314,7 @@ async def _can_use_tool(
             "session_id": session_id,
             "questions": questions,
             "question": first_q.get("question", ""),
-            "options": [{"label": o.get("label", ""), "description": o.get("description", "")} for o in first_q.get("options", [])],
+            "options": normalize_options(first_q.get("options", [])),
             "header": first_q.get("header", ""),
             "multi_select": first_q.get("multiSelect", False),
         }
@@ -697,6 +744,8 @@ class ClaudeOrchestrator:
             async def emit_pending_task_stream_events() -> AsyncIterator[SseEvent]:
                 while not submission_queue.empty():
                     task = submission_queue.get_nowait()
+                    if task.task_id not in session.pending_task_ids:
+                        session.pending_task_ids.append(task.task_id)
                     if (
                         task.task_id not in task_stream_tasks
                         and task.task_type in {"generate_summary", "generate_chapter", "revise_chapter", "append_chapter"}
@@ -869,6 +918,8 @@ class ClaudeOrchestrator:
                                                 displayed_task_results.add(task_id)
                                                 async for event in _stream_task_display_text(builder, task_id, task_type, content):
                                                     yield event
+                                            if task_id in session.pending_task_ids:
+                                                session.pending_task_ids.remove(task_id)
                                     elif normalized_result_tool == "poll_multiple_tasks" and isinstance(result_data, dict):
                                         items = result_data.get("tasks") or result_data.get("items") or result_data.get("results") or []
                                         if isinstance(items, list):
@@ -882,11 +933,15 @@ class ClaudeOrchestrator:
                                                         displayed_task_results.add(task_id)
                                                         async for event in _stream_task_display_text(builder, task_id, task_type, content):
                                                             yield event
+                                                    if task_id in session.pending_task_ids:
+                                                        session.pending_task_ids.remove(task_id)
 
                                     if _normalize_tool_name(result_tool_name) == "dispatch_generation_task" and preview:
                                         result_data = result_data or _parse_tool_json(result_text) or {}
                                         task_id = str(result_data.get("task_id") or "")
                                         task_type = str(result_data.get("task_type") or "")
+                                        if task_id and task_id not in session.pending_task_ids:
+                                            session.pending_task_ids.append(task_id)
                                         if (
                                             task_id
                                             and task_id not in task_stream_tasks
@@ -1003,14 +1058,10 @@ class ClaudeOrchestrator:
         return {"status": "ok", "resolved": resolved, "synthetic": is_synthetic}
 
     async def close_session(self, session: OrchestratorSession) -> None:
-        _cancel_pending_questions(session, "会话已关闭")
-        if session.sdk_client is not None:
-            try:
-                await session.sdk_client.disconnect()
-            except Exception as e:
-                log.warning("Failed to disconnect SDK client: %s", e)
-            session.sdk_client = None
-        _active_sessions.pop(session.session_id, None)
+        await close_orchestrator_session(session)
+
+    async def interrupt_session(self, session: OrchestratorSession) -> None:
+        await interrupt_orchestrator_session(session)
 
 
 def _evict_if_needed() -> None:

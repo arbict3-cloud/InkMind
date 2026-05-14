@@ -480,7 +480,7 @@ async def dispatch_generation_task(args: dict[str, Any]) -> dict[str, Any]:
     if "sub_agent_provider" not in params:
         params["sub_agent_provider"] = settings.default_llm_provider
 
-    if task_type == "generate_chapter" and "context_pack" not in params:
+    if task_type in {"generate_summary", "generate_chapter"} and "context_pack" not in params:
         db = _get_db()
         try:
             novel_id = _get_novel_id()
@@ -490,12 +490,15 @@ async def dispatch_generation_task(args: dict[str, Any]) -> dict[str, Any]:
                     db,
                     novel,
                     target_word_count=params.get("word_count"),
-                    chapter_summary_hint=params.get("chapter_summary"),
+                    chapter_summary_hint=params.get("chapter_summary")
+                    or params.get("chapter_summary_hint")
+                    or params.get("instruction"),
                 )
-                params.setdefault(
-                    "word_count",
-                    params["context_pack"]["style_constraints"]["target_word_count"],
-                )
+                if task_type == "generate_chapter":
+                    params.setdefault(
+                        "word_count",
+                        params["context_pack"]["style_constraints"]["target_word_count"],
+                    )
         finally:
             db.close()
 

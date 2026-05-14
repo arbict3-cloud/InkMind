@@ -94,11 +94,17 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
   };
 
   const handleOptionClick = (opt: QuestionOption) => {
+    if (disabled) return;
     setSelectedOption(opt);
     setCustomInput("");
     const cleanLabel = cleanOptionLabel(opt.label);
-    if (isLastStep && !isMultiStep) {
-      onAnswer(question.question_id, cleanLabel, cleanLabel);
+    const nextAnswers = { ...answers, [currentStep]: cleanLabel };
+    if (currentStep < steps.length - 1) {
+      setAnswers(nextAnswers);
+      setSelectedOption(null);
+      setCurrentStep(currentStep + 1);
+    } else {
+      onAnswer(question.question_id, buildAnswerPayload(nextAnswers), buildDisplayAnswer(nextAnswers));
     }
   };
 

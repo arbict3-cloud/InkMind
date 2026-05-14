@@ -1237,6 +1237,17 @@ export async function updateAgentTaskOutput(
   return data;
 }
 
+export async function interruptAgentSession(
+  novelId: number,
+  sessionId: string,
+): Promise<{ success: boolean; session_id: string }> {
+  const { data } = await api.post<{ success: boolean; session_id: string }>(
+    `/novels/${novelId}/agent/sessions/${sessionId}/interrupt`,
+    {}
+  );
+  return data;
+}
+
 export async function getAgentSession(
   novelId: number,
   sessionId: string

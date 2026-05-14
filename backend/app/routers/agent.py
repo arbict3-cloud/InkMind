@@ -24,7 +24,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.agent.agent_tools import set_task_output_override
-from app.agent.claude_orchestrator import ClaudeOrchestrator, _active_sessions
+from app.agent.claude_orchestrator import (
+    ClaudeOrchestrator,
+    _active_sessions,
+    close_orchestrator_session,
+    interrupt_orchestrator_session,
+)
 from app.agent.task_queue import get_task_queue
 from app.config import settings
 from app.database import SessionLocal, get_db
@@ -212,8 +217,29 @@ async def close_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"会话不存在: {session_id}",
         )
-    orchestrator = ClaudeOrchestrator(SessionLocal, None, None)
-    await orchestrator.close_session(session)
+    await close_orchestrator_session(session)
+    return {"success": True, "session_id": session_id}
+
+
+@router.post("/sessions/{session_id}/interrupt")
+async def interrupt_session(
+    novel_id: int,
+    session_id: str,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    session = _active_sessions.get(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"会话不存在: {session_id}",
+        )
+    if session.novel_id != novel_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="会话不属于该小说",
+        )
+    await interrupt_orchestrator_session(session)
     return {"success": True, "session_id": session_id}
 
 

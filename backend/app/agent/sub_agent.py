@@ -21,7 +21,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.agent.memory import NovelMemory
-from app.agent.task_queue import AgentTask, AgentTaskQueue, get_task_queue
+from app.agent.task_queue import AgentTask, AgentTaskQueue, AgentTaskStatus, get_task_queue
 from app.config import settings
 from app.language import Language
 from app.llm.base import LLMProvider, calc_max_tokens_from_word_count
@@ -36,6 +36,9 @@ _BG_MAX = 2200
 _WRITING_STYLE_MAX = 700
 _SUMMARY_LINE_MAX = 320
 _TASK_SUMMARY_MAX = 2800
+_PLACEHOLDER_SUMMARY_RE = re.compile(
+    r"(本章没有正文|没有正文|暂无正文|占位内容|待补充|无正文|无法生成摘要|未提供正文)"
+)
 
 
 def _clip(s: str | None, n: int) -> str:
@@ -110,6 +113,32 @@ def _format_context_pack(pack: dict[str, Any]) -> str:
     return "\n".join(line for line in lines if line.strip())
 
 
+def _fallback_summary_from_context(context_pack: dict[str, Any], instruction: str = "") -> str:
+    recent = context_pack.get("recent_chapter_summaries", [])
+    last_title = ""
+    last_summary = ""
+    if isinstance(recent, list) and recent:
+        last = recent[0] if isinstance(recent[0], dict) else {}
+        last_title = str(last.get("title") or "")
+        last_summary = str(last.get("summary") or "")
+
+    foreshadowing = context_pack.get("foreshadowing", [])
+    clue = ""
+    if isinstance(foreshadowing, list) and foreshadowing:
+        first = foreshadowing[0] if isinstance(foreshadowing[0], dict) else {}
+        clue = str(first.get("title") or first.get("body") or "")
+
+    base = instruction or last_summary or "承接上一章冲突，推动主角做出新的选择，并在结尾留下下一步悬念。"
+    pieces = [
+        f"承接上一章{f'《{last_title}》' if last_title else ''}的局势，围绕“{_clip(base, 120)}”展开。",
+        "本章需要明确核心冲突、人物行动和情绪转折，让剧情从余波进入新的对抗。",
+    ]
+    if clue:
+        pieces.append(f"可回收或推进线索：{_clip(clue, 120)}。")
+    pieces.append("结尾保留一个清晰钩子，为后续正文生成提供方向。")
+    return "".join(pieces)
+
+
 def _infer_expand_target_word_count(instruction: str, current_length: int) -> int | None:
     text = instruction or ""
     explicit_numbers = [int(n) for n in re.findall(r"(\d{3,5})\s*(?:字|words?|字符)?", text, flags=re.IGNORECASE)]
@@ -181,6 +210,8 @@ class SubAgentExecutor:
         raw_parts: list[str] = []
         body_streamer = _JsonBodyStreamer() if json_body_only else None
         for chunk in chunks:
+            if task.status == AgentTaskStatus.CANCELLED:
+                raise asyncio.CancelledError()
             raw_parts.append(chunk)
             visible = body_streamer.feed(chunk) if body_streamer else chunk
             if visible:
@@ -259,23 +290,69 @@ class SubAgentExecutor:
 
     async def execute_generate_summary(self, task: AgentTask) -> dict[str, Any]:
         params = task.params
-        chapter_content = params.get("chapter_content", "")
-        chapter_title = params.get("chapter_title", "")
+        chapter_content = (params.get("chapter_content") or "").strip()
+        chapter_title = (params.get("chapter_title") or "").strip()
+        context_pack = params.get("context_pack") if isinstance(params.get("context_pack"), dict) else None
+        instruction = str(
+            params.get("chapter_summary_hint")
+            or params.get("instruction")
+            or params.get("summary_hint")
+            or ""
+        ).strip()
 
         llm = self._resolve_llm(params.get("sub_agent_provider"), "AI助手生成摘要")
-        system = get_prompt("summarize_body_system", self._language)
-        title_display = chapter_title or get_prompt("common_none", self._language)
-        user_msg = get_prompt(
-            "summarize_body_user",
-            self._language,
-            title=title_display,
-            content=chapter_content[:8000],
-        )
-        summary = (await self._collect_streaming_text(
-            task,
-            filter_think_chunks(llm.stream_complete(system, user_msg)),
-            progress_message="正在生成章节摘要...",
-        )).strip()
+        if chapter_content:
+            system = get_prompt("summarize_body_system", self._language)
+            title_display = chapter_title or get_prompt("common_none", self._language)
+            user_msg = get_prompt(
+                "summarize_body_user",
+                self._language,
+                title=title_display,
+                content=chapter_content[:8000],
+            )
+        else:
+            if not context_pack:
+                memory = NovelMemory(self._db, self._novel)
+                context_text = memory.build_context(instruction)
+                context_pack = {}
+            else:
+                context_text = _format_context_pack(context_pack)
+            system = (
+                "你是小说章节规划助手。请基于作品上下文生成下一章的可执行章节摘要。"
+                "不要声称缺少正文，不要输出占位内容。"
+            )
+            user_msg = (
+                f"{context_text}\n\n"
+                "【任务】生成下一章摘要，而不是总结已有正文。\n"
+                f"用户/总指挥给出的方向：{instruction or '承接上一章自然推进'}\n\n"
+                "要求：\n"
+                "1. 120-260字。\n"
+                "2. 包含本章核心冲突、人物行动、情绪/关系变化和结尾悬念。\n"
+                "3. 可以给出标题倾向，但不要写成正文。\n"
+                "4. 禁止输出“本章没有正文”“占位内容”“待补充”等无效内容。\n"
+            )
+        chunks = filter_think_chunks(llm.stream_complete(system, user_msg))
+        if chapter_content:
+            summary = (await self._collect_streaming_text(
+                task,
+                chunks,
+                progress_message="正在生成章节摘要...",
+            )).strip()
+        else:
+            raw_parts: list[str] = []
+            for chunk in chunks:
+                if task.status == AgentTaskStatus.CANCELLED:
+                    raise asyncio.CancelledError()
+                raw_parts.append(chunk)
+            summary = "".join(raw_parts).strip()
+        if not summary or _PLACEHOLDER_SUMMARY_RE.search(summary):
+            summary = _fallback_summary_from_context(context_pack or {}, instruction)
+        if not chapter_content:
+            task.progress_message = "正在生成章节摘要..."
+            for piece in _stream_display_pieces(summary):
+                await task.publish_stream_event({"type": "delta", "content": piece})
+                if len(piece) >= 6:
+                    await asyncio.sleep(0.004)
 
         return {"summary": summary}
 

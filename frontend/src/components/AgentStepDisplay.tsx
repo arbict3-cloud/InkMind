@@ -6,8 +6,8 @@ interface Props {
   steps: SseAgentStepData[];
 }
 
-type StepStatus = "running" | "done" | "error";
-type PhaseStatus = "pending" | "running" | "done" | "error";
+type StepStatus = "running" | "done" | "error" | "cancelled";
+type PhaseStatus = "pending" | "running" | "done" | "error" | "cancelled";
 
 interface GroupedStep {
   rawName: string;
@@ -132,7 +132,7 @@ function groupSteps(steps: SseAgentStepData[], t: (key: string) => string): Grou
       });
     } else if (step.step_type === "finish") {
       for (const item of result) {
-        if (item.status === "running") item.status = "done";
+        if (item.status === "running") item.status = step.thought === "cancelled" ? "cancelled" : "done";
       }
     }
   }
@@ -160,19 +160,21 @@ function collectPhases(steps: SseAgentStepData[], t: (key: string) => string): P
 function statusIcon(status: StepStatus) {
   if (status === "done") return "✓";
   if (status === "error") return "✗";
+  if (status === "cancelled") return "×";
   return "→";
 }
 
 function phaseIcon(status: PhaseStatus) {
   if (status === "done") return "✓";
   if (status === "error") return "!";
+  if (status === "cancelled") return "×";
   if (status === "running") return "•";
   return "";
 }
 
 export default function AgentStepDisplay({ steps }: Props) {
   const { t } = useI18n();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const grouped = useMemo(() => groupSteps(steps, t), [steps, t]);
   const phases = useMemo(() => collectPhases(steps, t), [steps, t]);
   const runningCount = grouped.filter((group) => group.status === "running").length;

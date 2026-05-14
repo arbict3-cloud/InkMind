@@ -7,6 +7,7 @@ import {
   agentChat,
   agentAnswerQuestion,
   updateAgentTaskOutput,
+  interruptAgentSession,
   type AgentSession,
 } from "@/api/client";
 import type { PendingQuestionData, SseAgentStepData, SseChapterSavedData } from "@/types/sse";
@@ -140,6 +141,49 @@ function isTaskIntroChunk(content: string): boolean {
   return /^\s*#{1,4}\s*(章节摘要|正文草稿|改写草稿|续写草稿|生成内容)\s*$/m.test(content);
 }
 
+function stopAgentSteps(steps: SseAgentStepData[]): SseAgentStepData[] {
+  const next = [...steps];
+  const latestPhase = new Map<string, SseAgentStepData>();
+  for (const step of steps) {
+    if (step.step_type === "phase" && step.phase_id) latestPhase.set(step.phase_id, step);
+  }
+  for (const phase of latestPhase.values()) {
+    if (phase.phase_status === "running" && phase.phase_id) {
+      next.push({
+        step_type: "phase",
+        phase_id: phase.phase_id,
+        phase_status: "cancelled",
+        phase_title: phase.phase_title,
+        phase_detail: "已停止",
+        is_parallel: false,
+        ts: Date.now(),
+      });
+    }
+  }
+  next.push({ step_type: "finish", thought: "cancelled", is_parallel: false, ts: Date.now() });
+  return next;
+}
+
+function finishUserConfirmStep(steps: SseAgentStepData[]): SseAgentStepData[] {
+  const hasRunningConfirm = steps.some(
+    (step) => step.step_type === "phase"
+      && step.phase_id === "user_confirm"
+      && step.phase_status === "running",
+  );
+  if (!hasRunningConfirm) return steps;
+  return [
+    ...steps,
+    {
+      step_type: "phase" as const,
+      phase_id: "user_confirm",
+      phase_status: "done" as const,
+      phase_title: "用户确认",
+      is_parallel: false,
+      ts: Date.now(),
+    },
+  ];
+}
+
 function sanitizeAssistantContent(content: string): string {
   return content
     .replace(/[（(]\s*章节\s*ID\s*[:：]\s*\d+\s*[）)]/gi, "")
@@ -149,13 +193,117 @@ function sanitizeAssistantContent(content: string): string {
     .replace(/\s+([！!。,.，])/g, "$1");
 }
 
+const ACTIVITY_TOOL_LABELS: Record<string, string> = {
+  get_novel_state: "agent_activity_tool_get_novel_state",
+  get_chapters: "agent_activity_tool_get_chapters",
+  get_chapter_detail: "agent_activity_tool_get_chapter_detail",
+  get_characters: "agent_activity_tool_get_characters",
+  get_memos: "agent_activity_tool_get_memos",
+  get_writing_context_pack: "agent_activity_tool_get_writing_context_pack",
+  dispatch_generation_task: "agent_activity_tool_dispatch_generation_task",
+  poll_task_result: "agent_activity_tool_poll_task_result",
+  poll_multiple_tasks: "agent_activity_tool_poll_task_result",
+  quality_check_chapter: "agent_activity_tool_quality_check_chapter",
+  save_chapter: "agent_activity_tool_save_chapter",
+  delete_chapter: "agent_activity_tool_delete_chapter",
+  ask_user: "agent_activity_tool_ask_user",
+};
+
+const ACTIVITY_PHASE_LABELS: Record<string, string> = {
+  read_context: "agent_activity_phase_read_context",
+  chapter_summary: "agent_activity_phase_chapter_summary",
+  chapter_content: "agent_activity_phase_chapter_content",
+  quality_check: "agent_activity_phase_quality_check",
+  save_chapter: "agent_activity_phase_save_chapter",
+};
+
+function cleanAgentToolName(raw: string): string {
+  return raw
+    .replace(/^mcp__inkmind__/, "")
+    .replace(/^mcp_+inkmind_+/, "")
+    .replace(/^InkMind::/, "");
+}
+
+function isInternalAgentTool(name: string): boolean {
+  return /^tool_[a-f0-9_]+$/.test(name) || name === "agent_connect" || name === "agent_query";
+}
+
+function getAgentActivityLabel(steps: SseAgentStepData[], t: (key: string) => string): string {
+  const latestPhases = new Map<string, SseAgentStepData>();
+  const runningTools = new Map<string, number>();
+  let latestGenerating = false;
+  let latestEvaluating = false;
+
+  for (const step of steps) {
+    if (step.step_type === "phase" && step.phase_id) {
+      latestPhases.set(step.phase_id, step);
+    } else if (step.step_type === "tool_call") {
+      const name = cleanAgentToolName(step.tool_name || "");
+      if (name && !isInternalAgentTool(name)) {
+        runningTools.set(name, (runningTools.get(name) || 0) + 1);
+      }
+      latestGenerating = false;
+      latestEvaluating = false;
+    } else if (step.step_type === "tool_result") {
+      const name = cleanAgentToolName(step.tool_name || "");
+      const count = runningTools.get(name) || 0;
+      if (count <= 1) runningTools.delete(name);
+      else runningTools.set(name, count - 1);
+      latestGenerating = false;
+      latestEvaluating = false;
+    } else if (step.step_type === "generating") {
+      latestGenerating = true;
+      latestEvaluating = false;
+    } else if (step.step_type === "evaluating") {
+      latestEvaluating = true;
+      latestGenerating = false;
+    } else if (step.step_type === "finish") {
+      runningTools.clear();
+      latestGenerating = false;
+      latestEvaluating = false;
+    }
+  }
+
+  const activePhase = [...latestPhases.values()].find(
+    (step) => step.phase_status === "running" && step.phase_id !== "user_confirm",
+  );
+  if (activePhase?.phase_id) {
+    return t(ACTIVITY_PHASE_LABELS[activePhase.phase_id] || "agent_activity_working");
+  }
+  if (latestGenerating) return t("agent_activity_generating");
+  if (latestEvaluating) return t("agent_activity_evaluating");
+  const runningTool = [...runningTools.keys()].at(-1);
+  if (runningTool) {
+    return t(ACTIVITY_TOOL_LABELS[runningTool] || "agent_activity_using_named_tool")
+      .replace("{tool}", runningTool);
+  }
+  return t("agent_activity_thinking");
+}
+
 function AiAssistantMark({ className = "" }: { className?: string }) {
   return (
     <span className={`ai-assistant-mark ${className}`} aria-hidden="true">
-      <span className="ai-assistant-mark__spark ai-assistant-mark__spark--top" />
-      <span className="ai-assistant-mark__spark ai-assistant-mark__spark--side" />
-      <span className="ai-assistant-mark__cursor" />
+      <svg className="ai-assistant-mark__glyph" viewBox="0 0 24 24" focusable="false">
+        <path d="M7.3 8.4h9.4c1 0 1.8.8 1.8 1.8v5.6c0 1-.8 1.8-1.8 1.8H7.3c-1 0-1.8-.8-1.8-1.8v-5.6c0-1 .8-1.8 1.8-1.8Z" />
+        <path d="M12 8.2V5.5m-2 0h4" />
+        <circle cx="9.6" cy="12.7" r="1.2" />
+        <circle cx="14.4" cy="12.7" r="1.2" />
+      </svg>
     </span>
+  );
+}
+
+function AgentActivityIndicator({ label }: { label: string }) {
+  return (
+    <div className="agent-activity" aria-live="polite">
+      <span className="agent-activity__orb" aria-hidden="true" />
+      <span className="agent-activity__text">{label}</span>
+      <span className="agent-activity__dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+    </div>
   );
 }
 
@@ -174,6 +322,10 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const initializedRef = useRef(false);
   const activeAssistantIdRef = useRef<string>("");
+  const activeRunIdRef = useRef(0);
+  const activeAbortRef = useRef<AbortController | null>(null);
+  const activeCloseRef = useRef<(() => void) | null>(null);
+  const answeringQuestionRef = useRef(false);
   const resizeRef = useRef<{
     startX: number;
     startY: number;
@@ -370,16 +522,19 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     try { localStorage.removeItem(`${SESSION_KEY}_${novelId}`); } catch { /* ignore */ }
   }, [novelId]);
 
-  const buildChatHandlers = useCallback((aid: string) => {
+  const buildChatHandlers = useCallback((aid: string, runId: number) => {
     activeAssistantIdRef.current = aid;
+    const isStaleRun = () => activeRunIdRef.current !== runId;
     return {
       onPatch: (data: any) => {
+        if (isStaleRun()) return;
         if (data.message?.role === "assistant") {
           const currentAid = activeAssistantIdRef.current;
           setMessages((prev) => prev.map((m) => m.id === currentAid ? { ...m, content: data.message?.content || "", isStreaming: data.message?.is_streaming } : m));
         }
       },
       onDelta: (data: any) => {
+        if (isStaleRun()) return;
         if (data.type === "task_text" && data.content) {
           const currentAid = activeAssistantIdRef.current;
           const taskId = data.task_id || "task";
@@ -414,15 +569,27 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         }
       },
       onAgentStep: (data: any) => {
+        if (isStaleRun()) return;
+        if (
+          answeringQuestionRef.current
+          && data.step_type === "phase"
+          && data.phase_id === "user_confirm"
+          && data.phase_status === "running"
+        ) {
+          return;
+        }
         console.log("[AgentStep]", data.step_type, data.tool_name);
         setAgentSteps((prev) => [...prev, data]);
       },
       onQuestion: (data: any) => {
+        if (isStaleRun()) return;
+        answeringQuestionRef.current = false;
         console.log("[Question]", data.question, data.options);
         setMessages((prev) => stopStreamingMessages(prev));
         setPendingQuestion(data);
       },
       onChapterSaved: (data: any) => {
+        if (isStaleRun()) return;
         console.log("[ChapterSaved]", data.id, data.title);
         setMessages((prev) => [
           ...stopStreamingMessages(prev),
@@ -437,31 +604,47 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         window.dispatchEvent(new CustomEvent("inkmind:chapter-saved", { detail: data }));
       },
       onChapterDeleted: (data: any) => {
+        if (isStaleRun()) return;
         console.log("[ChapterDeleted]", data.id, data.title);
         window.dispatchEvent(new CustomEvent("inkmind:chapter-deleted", { detail: data }));
       },
       onStatus: (data: any) => {
+        if (isStaleRun()) return;
         const s = data.status || "idle";
+        if (s === "waiting_for_user" && answeringQuestionRef.current) return;
         setStatus(s);
         if (s === "waiting_for_user") {
           setMessages((prev) => stopStreamingMessages(prev));
           setIsLoading(false);
+          activeAbortRef.current = null;
+          activeCloseRef.current = null;
         } else if (s === "idle") {
+          answeringQuestionRef.current = false;
           setMessages((prev) => stopStreamingMessages(prev));
           setIsLoading(false);
+          activeAbortRef.current = null;
+          activeCloseRef.current = null;
         }
       },
       onDone: () => {
+        if (isStaleRun()) return;
+        answeringQuestionRef.current = false;
         setMessages((prev) => stopStreamingMessages(prev));
         setAgentSteps((prev) => [...prev, { step_type: "finish" as const, is_parallel: false, ts: Date.now() }]);
         setIsLoading(false);
+        activeAbortRef.current = null;
+        activeCloseRef.current = null;
       },
       onError: (data: any) => {
+        if (isStaleRun()) return;
+        answeringQuestionRef.current = false;
         setMessages((prev) => [
           ...stopStreamingMessages(prev),
           { id: generateId(), role: "error", content: data.message, timestamp: Date.now() },
         ]);
         setIsLoading(false);
+        activeAbortRef.current = null;
+        activeCloseRef.current = null;
       },
     };
   }, []);
@@ -474,47 +657,101 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setIsLoading(true);
     setPendingQuestion(null);
     setAgentSteps([]);
+    answeringQuestionRef.current = false;
+    const runId = activeRunIdRef.current + 1;
+    activeRunIdRef.current = runId;
 
     setMessages((prev) => [...stopStreamingMessages(prev), { id: generateId(), role: "user", content: text, timestamp: Date.now() }]);
 
     try {
       const cur = await ensureSession();
+      if (activeRunIdRef.current !== runId) return;
       const aid = generateId();
       setMessages((prev) => [...prev, { id: aid, role: "assistant", content: "", timestamp: Date.now(), isStreaming: true }]);
 
-      const handlers = buildChatHandlers(aid);
+      const handlers = buildChatHandlers(aid, runId);
       const retryOnError: typeof handlers = {
         ...handlers,
         onError: async (data: any) => {
+          if (activeRunIdRef.current !== runId) return;
           const msg = data.message || "";
           if (msg.includes("会话不存在") || msg.includes("not found")) {
             resetSession();
-            try {
-              const newSess = await createNewSession();
-              const retryHandlers = buildChatHandlers(aid);
-              await agentChat(novelId, newSess.session_id, text, retryHandlers);
-            } catch {
-              setMessages((prev) => [...prev, { id: generateId(), role: "error", content: "创建新会话失败", timestamp: Date.now() }]);
-              setIsLoading(false);
+	            try {
+	              const newSess = await createNewSession();
+                if (activeRunIdRef.current !== runId) return;
+	              const retryHandlers = buildChatHandlers(aid, runId);
+	              const retryController = new AbortController();
+	              activeAbortRef.current = retryController;
+	              const retryConn = await agentChat(novelId, newSess.session_id, text, retryHandlers, { signal: retryController.signal });
+                if (activeRunIdRef.current !== runId) {
+                  retryConn.close();
+                  return;
+                }
+	              activeCloseRef.current = retryConn.close;
+	            } catch {
+                if (activeRunIdRef.current !== runId) return;
+	              setMessages((prev) => [...prev, { id: generateId(), role: "error", content: "创建新会话失败", timestamp: Date.now() }]);
+	              setIsLoading(false);
             }
           } else {
             handlers.onError(data);
           }
         },
-      };
+	      };
 
-      await agentChat(novelId, cur.session_id, text, retryOnError);
-    } catch (err) {
+	      const controller = new AbortController();
+	      activeAbortRef.current = controller;
+	      const conn = await agentChat(novelId, cur.session_id, text, retryOnError, { signal: controller.signal });
+        if (activeRunIdRef.current !== runId) {
+          conn.close();
+          return;
+        }
+	      activeCloseRef.current = conn.close;
+	    } catch (err) {
+      if (activeRunIdRef.current !== runId) return;
       setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
       setIsLoading(false);
     }
   }, [input, isLoading, novelId, ensureSession, resetSession, createNewSession, buildChatHandlers]);
 
+  const handleInterrupt = useCallback(async () => {
+    if (!isLoading || !novelId || !session) return;
+    activeRunIdRef.current += 1;
+    activeCloseRef.current?.();
+    activeAbortRef.current?.abort();
+    activeCloseRef.current = null;
+    activeAbortRef.current = null;
+    answeringQuestionRef.current = false;
+    setIsLoading(false);
+    setPendingQuestion(null);
+    setStatus("idle");
+    setAgentSteps((prev) => stopAgentSteps(prev));
+    setMessages((prev) => [
+      ...stopStreamingMessages(prev),
+      { id: generateId(), role: "system", content: t("agent_interrupted"), timestamp: Date.now() },
+    ]);
+    try {
+      await interruptAgentSession(novelId, session.session_id);
+    } catch (err) {
+      setMessages((prev) => [...prev, {
+        id: generateId(),
+        role: "error",
+        content: err instanceof Error ? err.message : t("agent_interrupt_failed"),
+        timestamp: Date.now(),
+      }]);
+    }
+  }, [isLoading, novelId, session, t]);
+
   const handleAnswerQuestion = useCallback(async (questionId: string, answer: string, selectedOption?: string) => {
     if (!session || !pendingQuestion) return;
     setPendingQuestion(null);
     setIsLoading(true);
+    setStatus("running");
+    answeringQuestionRef.current = true;
+    setAgentSteps((prev) => finishUserConfirmStep(prev));
     const answerText = selectedOption || answer;
+    const runId = activeRunIdRef.current;
 
     const newAid = generateId();
     activeAssistantIdRef.current = newAid;
@@ -525,12 +762,23 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     ]);
 
     try {
-      const result = await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption);
-      if (!result.resolved) {
-        const handlers = buildChatHandlers(newAid);
-        await agentChat(novelId!, session.session_id, answerText, handlers);
-      }
+	      const result = await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption);
+        if (activeRunIdRef.current !== runId) return;
+	      if (!result.resolved) {
+          const fallbackRunId = activeRunIdRef.current + 1;
+          activeRunIdRef.current = fallbackRunId;
+	        const handlers = buildChatHandlers(newAid, fallbackRunId);
+	        const controller = new AbortController();
+	        activeAbortRef.current = controller;
+	        const conn = await agentChat(novelId!, session.session_id, answerText, handlers, { signal: controller.signal });
+          if (activeRunIdRef.current !== fallbackRunId) {
+            conn.close();
+            return;
+          }
+	        activeCloseRef.current = conn.close;
+	      }
     } catch (err) {
+      if (activeRunIdRef.current !== runId) return;
       setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
       setIsLoading(false);
     }
@@ -638,6 +886,8 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setIsIconDragging(true);
   }, [iconPos]);
 
+  const activityLabel = getAgentActivityLabel(agentSteps, t);
+
   return (
     <>
       {!isOpen && (
@@ -705,7 +955,9 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
               </div>
             )}
             {messages.map((msg) => {
-              if (msg.role === "assistant" && msg.isStreaming && !msg.content.trim() && !(msg.taskSections?.length)) {
+              const isEmptyAssistant = msg.role === "assistant" && !msg.content.trim() && !(msg.taskSections?.length);
+              const showAssistantActivity = msg.role === "assistant" && msg.isStreaming && isLoading && !pendingQuestion;
+              if (isEmptyAssistant && !msg.isStreaming) {
                 return null;
               }
               return (
@@ -745,7 +997,9 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
                       <AiAssistantMark className="ai-assistant-mark--avatar" />
                     </div>
 	                    <div className="agent-message-body">
-	                      {msg.content.trim() && (
+                        {isEmptyAssistant && msg.isStreaming ? (
+                          <AgentActivityIndicator label={activityLabel} />
+                        ) : msg.content.trim() && (
 	                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitizeAssistantContent(msg.content)}</ReactMarkdown>
 	                      )}
 	                      {msg.taskSections?.map((section) => (
@@ -802,7 +1056,10 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 	                          )}
 	                        </div>
 	                      ))}
-	                      {msg.isStreaming && msg.content.trim() && <span className="agent-cursor" aria-hidden="true" />}
+                        {!isEmptyAssistant && showAssistantActivity && (
+                          <AgentActivityIndicator label={activityLabel} />
+                        )}
+	                      {msg.isStreaming && msg.content.trim() && !showAssistantActivity && <span className="agent-cursor" aria-hidden="true" />}
 	                    </div>
                   </div>
                 )}
@@ -828,17 +1085,21 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
               placeholder={t("agent_chat_placeholder")}
               disabled={isLoading}
             />
-            <button
-              className="agent-send-btn"
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-              aria-label={t("agent_chat_send")}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13" />
-                <polygon points="22 2 15 22 11 13 2 9 22 2" />
-              </svg>
-            </button>
+	            <button
+	              className={`agent-send-btn${isLoading ? " agent-send-btn--stop" : ""}`}
+	              onClick={isLoading ? handleInterrupt : handleSend}
+	              disabled={!isLoading && !input.trim()}
+	              aria-label={isLoading ? t("agent_chat_stop") : t("agent_chat_send")}
+	            >
+	              {isLoading ? (
+	                <span className="agent-stop-icon" aria-hidden="true" />
+	              ) : (
+	                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+	                  <line x1="22" y1="2" x2="11" y2="13" />
+	                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+	                </svg>
+	              )}
+	            </button>
           </div>
         </div>
       )}

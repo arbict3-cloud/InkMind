@@ -66,7 +66,7 @@ export interface SseAgentStepData {
   thought?: string;
   result_preview?: string;
   phase_id?: string;
-  phase_status?: "pending" | "running" | "done" | "error";
+  phase_status?: "pending" | "running" | "done" | "error" | "cancelled";
   phase_title?: string;
   phase_detail?: string;
   step_number?: number;

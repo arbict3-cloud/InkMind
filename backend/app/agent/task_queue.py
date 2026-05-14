@@ -209,6 +209,8 @@ class AgentTaskQueue:
                 return False
             task.status = AgentTaskStatus.CANCELLED
             task.completed_at = time.time()
+            await task.publish_stream_event({"type": "error", "error": "任务已中断"})
+            await task.close_stream()
             return True
 
     async def cleanup(self, max_age_seconds: float = 3600) -> int:
