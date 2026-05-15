@@ -83,6 +83,8 @@ export default function NovelWrite() {
   const sidebarToolsRef = useRef<HTMLDivElement | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const commandPanelRef = useRef<HTMLDivElement | null>(null);
+  const selectionPanelRef = useRef<HTMLDivElement | null>(null);
+  const evaluatePanelRef = useRef<HTMLDivElement | null>(null);
   const commandPanelDragRef = useRef<{
     startX: number;
     startY: number;
@@ -103,6 +105,16 @@ export default function NovelWrite() {
   const [evaluateResult, setEvaluateResult] = useState<{
     issues: { aspect: string; detail: string }[];
     de_ai_score: number;
+  } | null>(null);
+  const [evaluatePanelPos, setEvaluatePanelPos] = useState<{ left: number; top: number } | null>(null);
+  const [evaluatePanelDragging, setEvaluatePanelDragging] = useState(false);
+  const evaluatePanelDragRef = useRef<{
+    startX: number;
+    startY: number;
+    startLeft: number;
+    startTop: number;
+    width: number;
+    height: number;
   } | null>(null);
 
   const [llmOptions, setLlmOptions] = useState<string[]>([]);
@@ -128,6 +140,16 @@ export default function NovelWrite() {
     streaming: string;
   } | null>(null);
   const [selectionMenuPos, setSelectionMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [selectionPanelPos, setSelectionPanelPos] = useState<{ left: number; top: number } | null>(null);
+  const [selectionPanelDragging, setSelectionPanelDragging] = useState(false);
+  const selectionPanelDragRef = useRef<{
+    startX: number;
+    startY: number;
+    startLeft: number;
+    startTop: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const selectionRangeRef = useRef<{ start: number; end: number } | null>(null);
   selectionRangeRef.current = selectionRange;
   const [err, setErr] = useState("");
@@ -186,6 +208,55 @@ export default function NovelWrite() {
     setCommandPanelDragging(true);
   }, [rightTool]);
 
+  const handleSelectionPanelDragStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, textarea, input, select, a")) return;
+    const rect = selectionPanelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const startLeft = selectionPanelPos?.left ?? selectionMenuPos?.left ?? rect.left + rect.width / 2;
+    const startTop = selectionPanelPos?.top ?? (selectionMenuPos ? selectionMenuPos.top + 8 : rect.top);
+    event.preventDefault();
+    selectionPanelDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft,
+      startTop,
+      width: rect.width,
+      height: rect.height,
+    };
+    setSelectionPanelPos({ left: startLeft, top: startTop });
+    setSelectionPanelDragging(true);
+  }, [selectionMenuPos, selectionPanelPos]);
+
+  const getEvaluatePanelDefaultPos = useCallback((): { left: number; top: number } => {
+    const margin = 20;
+    const panelWidth = Math.min(440, window.innerWidth - margin * 2);
+    return {
+      left: Math.max(margin, window.innerWidth - panelWidth - 34),
+      top: Math.max(margin, Math.min(132, window.innerHeight - 360)),
+    };
+  }, []);
+
+  const handleEvaluatePanelDragStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, textarea, input, select, a")) return;
+    const rect = evaluatePanelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const startLeft = evaluatePanelPos?.left ?? rect.left;
+    const startTop = evaluatePanelPos?.top ?? rect.top;
+    event.preventDefault();
+    evaluatePanelDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft,
+      startTop,
+      width: rect.width,
+      height: rect.height,
+    };
+    setEvaluatePanelPos({ left: startLeft, top: startTop });
+    setEvaluatePanelDragging(true);
+  }, [evaluatePanelPos]);
+
   const loadChapters = useCallback(async () => {
     const list = await fetchChapters(id);
     setChapters(list);
@@ -237,6 +308,66 @@ export default function NovelWrite() {
       window.removeEventListener("pointercancel", handleUp);
     };
   }, [commandPanelDragging]);
+
+  useEffect(() => {
+    if (!selectionPanelDragging) return;
+
+    const handleMove = (event: PointerEvent) => {
+      const drag = selectionPanelDragRef.current;
+      if (!drag) return;
+      const margin = 12;
+      const halfWidth = drag.width / 2;
+      const minLeft = margin + halfWidth;
+      const maxLeft = Math.max(minLeft, window.innerWidth - halfWidth - margin);
+      const maxTop = Math.max(margin, window.innerHeight - drag.height - margin);
+      setSelectionPanelPos({
+        left: Math.min(maxLeft, Math.max(minLeft, drag.startLeft + event.clientX - drag.startX)),
+        top: Math.min(maxTop, Math.max(margin, drag.startTop + event.clientY - drag.startY)),
+      });
+    };
+    const handleUp = () => {
+      selectionPanelDragRef.current = null;
+      setSelectionPanelDragging(false);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [selectionPanelDragging]);
+
+  useEffect(() => {
+    if (!evaluatePanelDragging) return;
+
+    const handleMove = (event: PointerEvent) => {
+      const drag = evaluatePanelDragRef.current;
+      if (!drag) return;
+      const margin = 12;
+      const maxLeft = Math.max(margin, window.innerWidth - drag.width - margin);
+      const maxTop = Math.max(margin, window.innerHeight - drag.height - margin);
+      setEvaluatePanelPos({
+        left: Math.min(maxLeft, Math.max(margin, drag.startLeft + event.clientX - drag.startX)),
+        top: Math.min(maxTop, Math.max(margin, drag.startTop + event.clientY - drag.startY)),
+      });
+    };
+    const handleUp = () => {
+      evaluatePanelDragRef.current = null;
+      setEvaluatePanelDragging(false);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [evaluatePanelDragging]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -404,6 +535,7 @@ export default function NovelWrite() {
     setBatchStreaming("");
     setSelectionRange(null);
     setSelectionPanel(null);
+    setEvaluatePanelPos(null);
   }, [id]);
 
   useEffect(() => {
@@ -415,6 +547,7 @@ export default function NovelWrite() {
     setBatchStreaming("");
     setSelectionRange(null);
     setSelectionPanel(null);
+    setEvaluatePanelPos(null);
   }, [activeId]);
 
   useEffect(() => {
@@ -446,10 +579,11 @@ export default function NovelWrite() {
 
   useEffect(() => {
     if (!busy) return;
+    if (selectionPanel) return;
     const el = bodyTextareaRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [content, busy]);
+  }, [content, busy, selectionPanel]);
 
   const hasBody = (content || "").trim().length > 0;
   const hasLlm = llmOptions.length > 0;
@@ -481,10 +615,32 @@ export default function NovelWrite() {
     setSelectionRange(captureSelection());
   }
 
+  function getSelectionResultAnchor(range: { start: number; end: number }): { left: number; top: number } | null {
+    const ta = bodyTextareaRef.current;
+    if (!ta || range.start === range.end) return null;
+    const startPt = getCaretViewportPoint(ta, range.start);
+    const endPt = getCaretViewportPoint(ta, range.end);
+    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 24;
+    const viewportPadding = 16;
+    const panelWidth = Math.min(440, window.innerWidth - viewportPadding * 2);
+    const halfPanel = panelWidth / 2;
+    const minLeft = viewportPadding + halfPanel;
+    const maxLeft = Math.max(minLeft, window.innerWidth - halfPanel - viewportPadding);
+    const maxTop = Math.max(viewportPadding, window.innerHeight - 260);
+    const selectionCenter = (startPt.left + endPt.left) / 2;
+    return {
+      left: Math.min(maxLeft, Math.max(minLeft, selectionCenter)),
+      top: Math.min(maxTop, Math.max(viewportPadding, Math.max(startPt.top, endPt.top) + lineHeight + 10)),
+    };
+  }
+
   useEffect(() => {
     if (!selectionPanel) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectionPanel(null);
+      if (e.key === "Escape") {
+        setSelectionPanel(null);
+        setSelectionPanelPos(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -506,6 +662,7 @@ export default function NovelWrite() {
       return;
     }
     setErr("");
+    setSelectionPanelPos(getSelectionResultAnchor(r));
     setSelectionPanel({ mode, start: r.start, end: r.end, text: "", streaming: "" });
     setBusy(true);
     try {
@@ -537,6 +694,7 @@ export default function NovelWrite() {
 
   function closeSelectionPanel() {
     setSelectionPanel(null);
+    setSelectionPanelPos(null);
   }
 
   function applySelectionReplace() {
@@ -549,6 +707,7 @@ export default function NovelWrite() {
       return normalizeBodyParagraphIndent(insertion);
     });
     setSelectionPanel(null);
+    setSelectionPanelPos(null);
     setSelectionRange(null);
     setSelectionMenuPos(null);
   }
@@ -1285,6 +1444,7 @@ export default function NovelWrite() {
     setEvaluateBusy(true);
     setErr("");
     setEvaluateResult(null);
+    setEvaluatePanelPos(getEvaluatePanelDefaultPos());
     try {
       const data = await evaluateChapter(
         id,
@@ -1327,6 +1487,12 @@ export default function NovelWrite() {
         versions: t("write_version_desc"),
       } satisfies Record<AiTool, string>)[rightTool]
     : "";
+  const selectionPanelPosition = selectionPanel && selectionMenuPos
+    ? (selectionPanelPos ?? { left: selectionMenuPos.left, top: selectionMenuPos.top + 8 })
+    : null;
+  const evaluatePanelPosition = evaluateResult
+    ? (evaluatePanelPos ?? getEvaluatePanelDefaultPos())
+    : null;
 
   return (
     <div className={`write-shell write-theme--${theme}${focusMode ? " write-focus-mode" : ""}`}>
@@ -1502,34 +1668,6 @@ export default function NovelWrite() {
                     />
                   </div>
                 </div>
-                {evaluateResult ? (
-                  <div className="write-inline-result write-inline-result--eval">
-                    <div className="write-inline-result__head">
-                      <span>{t("write_evaluate_chapter")}</span>
-                      <button type="button" className="write-inline-result__close" onClick={() => setEvaluateResult(null)}>
-                        {t("write_close")}
-                      </button>
-                    </div>
-                    <div className="write-eval-score" aria-label={t("write_deai_score_aria")}>
-                      <span className="write-eval-score-num">{evaluateResult.de_ai_score}</span>
-                      <span className="write-eval-score-denom">/ 100</span>
-                      <span className="muted write-eval-score-label">{t("write_deai_score_desc")}</span>
-                    </div>
-                    {evaluateResult.issues.length > 0 ? (
-                      <ul className="write-eval-issues">
-                        {evaluateResult.issues.map((it, i) => (
-                          <li key={i}>
-                            <strong>{it.aspect}</strong>
-                            <span className="muted">{t("write_eval_issue_separator")}</span>
-                            {it.detail}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="muted">{t("write_evaluate_no_issues")}</p>
-                    )}
-                  </div>
-                ) : null}
                 {focusMode ? (
                   <div className="write-editor-footer">
                     <button
@@ -2104,6 +2242,62 @@ export default function NovelWrite() {
         </div>
       )}
 
+      {evaluateResult && evaluatePanelPosition ? (
+        <div
+          ref={evaluatePanelRef}
+          className={`write-evaluate-panel${evaluatePanelDragging ? " is-dragging" : ""}`}
+          role="dialog"
+          aria-label={t("write_ai_check_result_title")}
+          style={{ left: evaluatePanelPosition.left, top: evaluatePanelPosition.top }}
+        >
+          <div className="write-evaluate-panel__head" onPointerDown={handleEvaluatePanelDragStart}>
+            <div className="write-evaluate-panel__title">
+              <span className="write-evaluate-panel__badge">AI</span>
+              <div>
+                <strong>{t("write_ai_check_result_title")}</strong>
+                <small>
+                  {evaluateResult.issues.length > 0
+                    ? t("write_ai_check_issue_count").replace("{count}", String(evaluateResult.issues.length))
+                    : t("write_evaluate_no_issues")}
+                </small>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="write-evaluate-panel__close"
+              onClick={() => {
+                setEvaluateResult(null);
+                setEvaluatePanelPos(null);
+              }}
+            >
+              {t("write_close")}
+            </button>
+          </div>
+          <div className="write-evaluate-panel__body">
+            <div className="write-evaluate-panel__score" aria-label={t("write_deai_score_aria")}>
+              <span className="write-evaluate-panel__score-num">{evaluateResult.de_ai_score}</span>
+              <span className="write-evaluate-panel__score-denom">/ 100</span>
+              <span className="write-evaluate-panel__score-label">{t("write_deai_score_desc")}</span>
+            </div>
+            {evaluateResult.issues.length > 0 ? (
+              <div className="write-evaluate-panel__issues" aria-label={t("write_evaluate_issues")}>
+                {evaluateResult.issues.map((it, i) => (
+                  <article key={`${it.aspect}-${i}`} className="write-evaluate-panel__issue">
+                    <span className="write-evaluate-panel__issue-index">{i + 1}</span>
+                    <div>
+                      <strong>{it.aspect}</strong>
+                      <p>{it.detail}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="write-evaluate-panel__empty">{t("write_no_issues_found")}</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {showSelectionBar && selectionMenuPos ? (
         <SelectionFloatMenu
           top={selectionMenuPos.top}
@@ -2114,19 +2308,23 @@ export default function NovelWrite() {
         />
       ) : null}
 
-      {selectionPanel && selectionMenuPos ? (
+      {selectionPanel && selectionPanelPosition ? (
         <div
-          className="write-selection-result-float"
+          ref={selectionPanelRef}
+          className={`write-selection-result-float${selectionPanelDragging ? " is-dragging" : ""}`}
           role="status"
-          style={{ top: selectionMenuPos.top + 8, left: selectionMenuPos.left }}
+          style={{ top: selectionPanelPosition.top, left: selectionPanelPosition.left }}
         >
-          <div className="write-selection-result-float__head">
-            <span>
-              {selectionPanel.mode === "rewrite" && t("write_selection_rewrite_title")}
-              {selectionPanel.mode === "expand" && t("write_selection_expand_title")}
-              {selectionPanel.mode === "polish" && t("write_selection_polish_title")}
-              {selectionPanel.mode === "append" && t("write_selection_append_title")}
-            </span>
+          <div className="write-selection-result-float__head" onPointerDown={handleSelectionPanelDragStart}>
+            <div className="write-selection-result-float__title">
+              <span className="write-selection-result-float__badge">AI</span>
+              <span>
+                {selectionPanel.mode === "rewrite" && t("write_selection_rewrite_title")}
+                {selectionPanel.mode === "expand" && t("write_selection_expand_title")}
+                {selectionPanel.mode === "polish" && t("write_selection_polish_title")}
+                {selectionPanel.mode === "append" && t("write_selection_append_title")}
+              </span>
+            </div>
             <button type="button" className="write-selection-result-float__close" onClick={closeSelectionPanel}>
               {t("write_selection_exit")}
             </button>

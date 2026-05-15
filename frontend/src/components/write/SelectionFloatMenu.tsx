@@ -26,6 +26,7 @@ function SelectionFloatMenu({
       aria-label={t("write_selection_ai_aria")}
       style={{ top, left }}
     >
+      <span className="write-selection-float__label">AI</span>
       <button type="button" className="write-selection-float__item" disabled={busy} onMouseDown={(e) => e.preventDefault()} onClick={() => void onRunAi("rewrite")}>
         {t("write_selection_rewrite")}
       </button>

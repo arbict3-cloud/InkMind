@@ -1169,15 +1169,20 @@
   position: fixed;
   z-index: 190;
   transform: translateX(-50%);
-  width: min(420px, calc(100vw - 32px));
-  max-height: min(60vh, 480px);
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(62vh, 500px);
   display: flex;
   flex-direction: column;
   border-radius: 14px;
-  border: 1px solid var(--write-hairline);
-  background: var(--write-canvas);
-  box-shadow: var(--write-shadow);
+  border: 1px solid color-mix(in oklab, var(--write-accent) 16%, var(--write-hairline));
+  background: color-mix(in oklab, var(--write-canvas) 94%, #fff);
+  box-shadow: 0 18px 50px rgba(28, 25, 23, 0.13);
   overflow: hidden;
+}
+
+.write-selection-result-float.is-dragging {
+  user-select: none;
+  box-shadow: 0 22px 58px rgba(28, 25, 23, 0.17);
 }
 
 .write-selection-result-float__head {
@@ -1185,12 +1190,39 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--write-hairline-soft);
+  padding: 11px 13px;
+  border-bottom: 1px solid color-mix(in oklab, var(--write-accent) 14%, var(--write-hairline-soft));
+  background: color-mix(in oklab, var(--write-accent) 8%, var(--write-canvas));
   color: var(--write-ink);
   font-size: 0.84rem;
   font-weight: 700;
   font-family: var(--font-ui);
+  cursor: grab;
+}
+
+.write-selection-result-float.is-dragging .write-selection-result-float__head {
+  cursor: grabbing;
+}
+
+.write-selection-result-float__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.write-selection-result-float__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--write-accent);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .write-selection-result-float__close {
@@ -1200,12 +1232,23 @@
   cursor: pointer;
   font-size: 0.78rem;
   font-family: var(--font-ui);
+  border-radius: 7px;
+  padding: 4px 6px;
+}
+
+.write-selection-result-float__close:hover {
+  background: color-mix(in oklab, var(--write-ink) 6%, transparent);
+  color: var(--write-ink);
 }
 
 .write-selection-result-float__body {
   flex: 1;
   overflow: auto;
-  padding: 12px 14px;
+  margin: 12px 13px;
+  padding: 12px 13px;
+  border: 1px solid color-mix(in oklab, var(--write-hairline) 80%, transparent);
+  border-radius: 11px;
+  background: color-mix(in oklab, var(--write-canvas) 72%, var(--write-surface-soft));
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.75;
@@ -1218,8 +1261,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--write-hairline-soft);
+  padding: 0 13px 13px;
+  border-top: none;
+}
+
+.write-selection-result-float__actions .btn {
+  min-height: 32px;
+  border-radius: 9px;
 }
 
 .write-body-wrapper {
@@ -1430,6 +1478,195 @@
   list-style: none;
   margin: 0.75rem 0 0;
   padding: 0;
+}
+
+.write-evaluate-panel {
+  position: fixed;
+  z-index: 875;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(72vh, 620px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--write-accent) 16%, var(--write-hairline));
+  background: color-mix(in oklab, var(--write-canvas) 95%, #fff);
+  box-shadow: 0 18px 50px rgba(28, 25, 23, 0.13);
+  overflow: hidden;
+}
+
+.write-evaluate-panel.is-dragging {
+  user-select: none;
+  box-shadow: 0 22px 58px rgba(28, 25, 23, 0.17);
+}
+
+.write-evaluate-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 14px;
+  border-bottom: 1px solid color-mix(in oklab, var(--write-accent) 14%, var(--write-hairline-soft));
+  background: color-mix(in oklab, var(--write-accent) 8%, var(--write-canvas));
+  cursor: grab;
+}
+
+.write-evaluate-panel.is-dragging .write-evaluate-panel__head {
+  cursor: grabbing;
+}
+
+.write-evaluate-panel__title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.write-evaluate-panel__title strong {
+  display: block;
+  color: var(--write-ink);
+  font-family: var(--font-ui);
+  font-size: 0.96rem;
+  line-height: 1.25;
+}
+
+.write-evaluate-panel__title small {
+  display: block;
+  margin-top: 3px;
+  color: var(--write-muted);
+  font-family: var(--font-ui);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.write-evaluate-panel__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 25px;
+  height: 25px;
+  border-radius: 999px;
+  background: var(--write-accent);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.write-evaluate-panel__close {
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 7px;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--write-muted);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+}
+
+.write-evaluate-panel__close:hover {
+  background: color-mix(in oklab, var(--write-ink) 6%, transparent);
+  color: var(--write-ink);
+}
+
+.write-evaluate-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 13px 14px 14px;
+}
+
+.write-evaluate-panel__score {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 12px 13px;
+  border: 1px solid color-mix(in oklab, var(--write-hairline) 82%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--write-canvas) 70%, var(--write-surface-soft));
+}
+
+.write-evaluate-panel__score-num {
+  color: var(--write-ink);
+  font-family: var(--font-serif);
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.write-evaluate-panel__score-denom {
+  color: var(--write-muted);
+  font-family: var(--font-ui);
+  font-size: 0.9rem;
+}
+
+.write-evaluate-panel__score-label {
+  margin-left: auto;
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--write-accent-teal) 12%, transparent);
+  color: color-mix(in oklab, var(--write-accent-teal) 70%, var(--write-ink));
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.write-evaluate-panel__issues {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.write-evaluate-panel__issue {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid color-mix(in oklab, var(--write-hairline) 80%, transparent);
+  border-radius: 11px;
+  background: color-mix(in oklab, var(--write-canvas) 80%, var(--write-surface-soft));
+}
+
+.write-evaluate-panel__issue-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--write-accent) 12%, transparent);
+  color: var(--write-accent-active);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.write-evaluate-panel__issue strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--write-ink);
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.write-evaluate-panel__issue p {
+  margin: 0;
+  color: var(--write-body);
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  line-height: 1.58;
+}
+
+.write-evaluate-panel__empty {
+  margin: 0;
+  padding: 12px 13px;
+  border-radius: 11px;
+  background: color-mix(in oklab, var(--write-accent-teal) 10%, transparent);
+  color: var(--write-body);
+  font-size: 0.84rem;
+  line-height: 1.55;
 }
 
 .write-editor-footer {
@@ -2137,36 +2374,52 @@
   transform: translate(-50%, calc(-100% - 4px));
   display: flex;
   flex-direction: row;
-  gap: 0;
+  align-items: center;
+  gap: 3px;
   min-width: 0;
   max-width: min(92vw, 620px);
-  background: var(--write-canvas);
-  border: 1px solid var(--write-hairline);
+  background: color-mix(in oklab, var(--write-canvas) 94%, #fff);
+  border: 1px solid color-mix(in oklab, var(--write-accent) 18%, var(--write-hairline));
   border-radius: 12px;
-  box-shadow: var(--write-shadow-soft);
+  box-shadow: 0 10px 24px rgba(28, 25, 23, 0.1);
   padding: 4px;
   overflow: hidden;
+}
+
+.write-selection-float__label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-width: 30px;
+  padding: 0 8px;
+  border-right: 1px solid color-mix(in oklab, var(--write-accent) 18%, var(--write-hairline));
+  color: var(--write-accent-active);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .write-selection-float__item {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 7px 10px;
+  padding: 7px 9px;
   border: none;
   background: transparent;
   cursor: pointer;
   font-size: 0.8rem;
   text-align: left;
   font-family: inherit;
-  color: var(--ink);
-  width: 100%;
+  color: var(--write-body);
   border-radius: 8px;
   white-space: nowrap;
 }
 
 .write-selection-float__item:hover:not(:disabled) {
-  background: var(--bg-deep);
+  background: color-mix(in oklab, var(--write-accent) 9%, transparent);
+  color: var(--write-accent-active);
 }
 
 .write-selection-float__item:disabled {
@@ -2934,6 +3187,13 @@
     transform: none;
     max-height: min(50vh, 400px);
   }
+
+  .write-evaluate-panel {
+    left: 12px !important;
+    right: 12px;
+    width: auto;
+    max-height: min(70vh, 560px);
+  }
 }
 
 .write-theme--dark .editor-body,
@@ -2981,11 +3241,29 @@
 
 .write-theme--dark .write-selection-result-float {
   background: var(--write-canvas);
-  border-color: var(--write-hairline);
+  border-color: color-mix(in oklab, var(--write-accent) 20%, var(--write-hairline));
 }
 
 .write-theme--dark .write-selection-result-float__body {
+  background: color-mix(in oklab, var(--write-surface) 58%, var(--write-canvas));
+  border-color: var(--write-hairline);
   color: var(--write-body);
+}
+
+.write-theme--dark .write-evaluate-panel {
+  background: var(--write-canvas);
+  border-color: color-mix(in oklab, var(--write-accent) 20%, var(--write-hairline));
+}
+
+.write-theme--dark .write-evaluate-panel__score,
+.write-theme--dark .write-evaluate-panel__issue {
+  background: color-mix(in oklab, var(--write-surface) 58%, var(--write-canvas));
+  border-color: var(--write-hairline);
+}
+
+.write-theme--dark .write-selection-float {
+  background: var(--write-canvas);
+  border-color: color-mix(in oklab, var(--write-accent) 20%, var(--write-hairline));
 }
 
 .write-theme--dark .version-diff-container .diff-equal {
