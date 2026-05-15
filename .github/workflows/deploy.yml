@@ -8,7 +8,49 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    env:
+      DOCKER_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+      DOCKER_IMAGE_PREFIX: ${{ secrets.ACR_NAMESPACE }}/inkmind
+      DOCKER_IMAGE_TAG: ${{ github.sha }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Aliyun ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-backend:${{ env.DOCKER_IMAGE_TAG }}
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-frontend:${{ env.DOCKER_IMAGE_TAG }}
+            ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_PREFIX }}-frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -16,7 +58,7 @@ jobs:
           port: "22"
           username: ${{ secrets.ALIYUN_USER }}
           key: ${{ secrets.ALIYUN_SSH_KEY }}
-          command_timeout: 30m
+          command_timeout: 10m
           script: |
             DEPLOY_PATH="/opt/inkmind"
             mkdir -p $DEPLOY_PATH
@@ -38,6 +80,9 @@ jobs:
             echo "=== [2/5] 写入 .env ==="
             cp deploy/env.production.template .env || { echo "ERROR: cp env template failed"; exit 1; }
 
+            sed -i "s|^DOCKER_REGISTRY=.*|DOCKER_REGISTRY=${{ env.DOCKER_REGISTRY }}|" .env
+            sed -i "s|^DOCKER_IMAGE_PREFIX=.*|DOCKER_IMAGE_PREFIX=${{ env.DOCKER_IMAGE_PREFIX }}|" .env
+            sed -i "s|^DOCKER_IMAGE_TAG=.*|DOCKER_IMAGE_TAG=${{ env.DOCKER_IMAGE_TAG }}|" .env
             [ -n "${{ secrets.SECRET_KEY }}" ] && sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${{ secrets.SECRET_KEY }}|" .env
             [ -n "${{ secrets.DATABASE_URL }}" ] && sed -i "s|^DATABASE_URL=.*|DATABASE_URL=${{ secrets.DATABASE_URL }}|" .env
             [ -n "${{ secrets.CORS_ORIGINS }}" ] && sed -i "s|^CORS_ORIGINS=.*|CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}|" .env
@@ -52,11 +97,12 @@ jobs:
             [ -n "${{ secrets.AGENT_MAX_TURNS }}" ] && sed -i "s|^AGENT_MAX_TURNS=.*|AGENT_MAX_TURNS=${{ secrets.AGENT_MAX_TURNS }}|" .env
             echo ".env 已写入"
 
-            echo "=== [3/5] 构建镜像 ==="
-            docker compose build || { echo "ERROR: docker compose build failed"; exit 1; }
+            echo "=== [3/5] 拉取镜像 ==="
+            printf '%s' "${{ secrets.ACR_PASSWORD }}" | docker login "${{ env.DOCKER_REGISTRY }}" -u "${{ secrets.ACR_USERNAME }}" --password-stdin || { echo "ERROR: docker login failed"; exit 1; }
+            docker compose pull || { echo "ERROR: docker compose pull failed"; exit 1; }
 
             echo "=== [4/5] 启动服务 ==="
-            docker compose up -d --remove-orphans || {
+            docker compose up -d --remove-orphans --no-build || {
               echo "ERROR: docker compose up failed，查看后端日志："
               docker compose logs backend --tail=100 2>/dev/null || true
               exit 1
