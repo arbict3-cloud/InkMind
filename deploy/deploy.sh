@@ -36,16 +36,16 @@ git fetch origin main
 git reset --hard origin/main
 
 # ------------------------------------------
-# 3. 构建镜像
+# 3. 拉取镜像
 # ------------------------------------------
-echo "[2/4] 构建 Docker 镜像..."
-docker compose build --no-cache
+echo "[2/4] 拉取 Docker 镜像..."
+docker compose pull
 
 # ------------------------------------------
 # 4. 启动服务
 # ------------------------------------------
 echo "[3/4] 启动服务..."
-docker compose up -d --remove-orphans
+docker compose up -d --remove-orphans --no-build
 
 # ------------------------------------------
 # 5. 健康检查
