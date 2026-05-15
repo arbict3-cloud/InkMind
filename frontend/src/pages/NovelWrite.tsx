@@ -2,6 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useParams, useNavigate } from "react-router-dom";
 import { Modal } from "antd";
 import {
+  CheckCircleOutlined,
+  EditOutlined,
+  ForwardOutlined,
+  RobotOutlined,
+  ThunderboltOutlined,
+} from "@ant-design/icons";
+import {
   apiErrorMessage,
   compareVersionWithCurrent,
   confirmChapterGeneration,
@@ -193,8 +200,7 @@ export default function NovelWrite() {
   const showBatchInspireCta = !batchSummary.trim();
 
   const wordCount = content.replace(/\s/g, "").length;
-  const charCount = content.length;
-  const paragraphCount = content.split("\n").filter((p) => p.trim()).length;
+  const wordCountText = t("write_version_word_count").replace("{count}", String(wordCount));
   const summaryRows = useMemo(() => estimateTextareaRows(summary, narrow ? 32 : 78, 3, 9), [summary, narrow]);
 
   useEffect(() => {
@@ -1406,6 +1412,7 @@ export default function NovelWrite() {
                         {saveStatus === "unsaved" && <span className="write-save-dot write-save-dot--unsaved" aria-hidden />}
                         {saveStatus === "saving" ? t("write_saving") : saveStatus === "saved" ? t("write_saved") : t("write_save_unsaved")}
                       </span>
+                      <span className="write-meta-word-stat">{wordCountText}</span>
                     </div>
                   </div>
                   {summaryOpen && (
@@ -1429,6 +1436,7 @@ export default function NovelWrite() {
                           disabled={!hasLlm || busy}
                           onClick={() => setRightTool("generate")}
                         >
+                          <ThunderboltOutlined aria-hidden="true" />
                           {t("write_ai_quick_generate")}
                         </button>
                         <button
@@ -1437,6 +1445,7 @@ export default function NovelWrite() {
                           disabled={!hasLlm || busy || !hasBody}
                           onClick={() => setRightTool("rewrite")}
                         >
+                          <EditOutlined aria-hidden="true" />
                           {t("write_ai_quick_rewrite")}
                         </button>
                         <button
@@ -1445,6 +1454,7 @@ export default function NovelWrite() {
                           disabled={!hasLlm || busy}
                           onClick={() => setRightTool("append")}
                         >
+                          <ForwardOutlined aria-hidden="true" />
                           {t("write_ai_quick_continue")}
                         </button>
                         <button
@@ -1453,6 +1463,7 @@ export default function NovelWrite() {
                           disabled={!hasLlm || evaluateBusy || busy || !activeId}
                           onClick={() => void onRunEvaluate()}
                         >
+                          <CheckCircleOutlined aria-hidden="true" />
                           {evaluateBusy ? t("write_evaluating") : t("write_ai_quick_check")}
                         </button>
                         <button
@@ -1460,6 +1471,7 @@ export default function NovelWrite() {
                           className="write-ai-quickbtn write-ai-quickbtn--assistant"
                           onClick={() => handleOpenSmartWriterPrompt(t("smart_writer_recommend_next_step_prompt"))}
                         >
+                          <RobotOutlined aria-hidden="true" />
                           {t("write_ai_quick_ask")}
                         </button>
                       </div>
@@ -1518,22 +1530,8 @@ export default function NovelWrite() {
                     )}
                   </div>
                 ) : null}
-                <div className="write-editor-footer">
-                  <div className="write-word-stats">
-                    <span className="write-word-stat-item">
-                      <span className="write-word-stat-label">{t("write_stat_words")}</span>
-                      <span className="write-word-stat-value">{wordCount}</span>
-                    </span>
-                    <span className="write-word-stat-item">
-                      <span className="write-word-stat-label">{t("write_stat_chars")}</span>
-                      <span className="write-word-stat-value">{charCount}</span>
-                    </span>
-                    <span className="write-word-stat-item">
-                      <span className="write-word-stat-label">{t("write_stat_paragraphs")}</span>
-                      <span className="write-word-stat-value">{paragraphCount}</span>
-                    </span>
-                  </div>
-                  {focusMode ? (
+                {focusMode ? (
+                  <div className="write-editor-footer">
                     <button
                       type="button"
                       className="btn btn-ghost write-exit-focus-btn"
@@ -1541,8 +1539,8 @@ export default function NovelWrite() {
                     >
                       {t("write_exit_focus_mode_esc")}
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
               </>
             ) : (
               <p className="muted write-empty-hint">
@@ -1556,7 +1554,7 @@ export default function NovelWrite() {
       {!focusMode && drawerOpen && rightTool && (
         <div
           ref={commandPanelRef}
-          className={`write-ai-drawer${rightTool === "versions" ? " write-version-panel" : " write-command-panel"}${commandPanelDragging ? " is-dragging" : ""}`}
+          className={`write-ai-drawer${rightTool === "versions" ? " write-version-panel" : ` write-command-panel write-command-panel--${rightTool}`}${commandPanelDragging ? " is-dragging" : ""}`}
           style={rightTool !== "versions" && commandPanelPos ? {
             left: commandPanelPos.left,
             top: commandPanelPos.top,
@@ -1576,17 +1574,17 @@ export default function NovelWrite() {
           <div className="write-ai-drawer-body">
             {rightTool === "generate" && activeId ? (
               <div className="write-ai-section">
-                <div className="write-generate-tabs" role="tablist" aria-label={t("write_gen_mode")}>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={generateTab === "single"}
-                    className={`write-generate-tab${generateTab === "single" ? " is-active" : ""}`}
-                    onClick={() => setGenerateTab("single")}
-                  >
-                    {t("write_single_chapter")}
-                  </button>
-                  {isLatestChapter ? (
+                {isLatestChapter ? (
+                  <div className="write-generate-tabs" role="tablist" aria-label={t("write_gen_mode")}>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={generateTab === "single"}
+                      className={`write-generate-tab${generateTab === "single" ? " is-active" : ""}`}
+                      onClick={() => setGenerateTab("single")}
+                    >
+                      {t("write_single_chapter")}
+                    </button>
                     <button
                       type="button"
                       role="tab"
@@ -1596,8 +1594,8 @@ export default function NovelWrite() {
                     >
                       {t("write_batch_chapters")}
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
 
                 {generateTab === "single" ? (
                   <>
@@ -1643,53 +1641,56 @@ export default function NovelWrite() {
                       />
                     </div>
                     <details className="write-generate-advanced">
-                      <summary>{t("write_advanced_options")}</summary>
-                      <div className="field">
-                        <label htmlFor="write-ai-generate-title">{t("write_generate_title_optional")}</label>
-                        <input
-                          id="write-ai-generate-title"
-                          className="input"
-                          value={singleGenerateTitle}
-                          onChange={(e) => setSingleGenerateTitle(e.target.value)}
-                          placeholder={t("write_title_ai_decide")}
-                        />
+                      <summary><span>{t("write_advanced_options")}</span></summary>
+                      <div className="write-generate-advanced__content">
+                        <div className="field">
+                          <label htmlFor="write-ai-generate-title">{t("write_generate_title_optional")}</label>
+                          <input
+                            id="write-ai-generate-title"
+                            className="input"
+                            value={singleGenerateTitle}
+                            onChange={(e) => setSingleGenerateTitle(e.target.value)}
+                            placeholder={t("write_title_ai_decide")}
+                          />
+                        </div>
+                        <label className="write-generate-lock">
+                          <input
+                            type="checkbox"
+                            checked={singleGenerateLockTitle}
+                            onChange={(e) => setSingleGenerateLockTitle(e.target.checked)}
+                          />
+                          <span>{t("write_lock_title_desc")}</span>
+                        </label>
                       </div>
-                      <label className="write-generate-lock">
-                        <input
-                          type="checkbox"
-                          checked={singleGenerateLockTitle}
-                          onChange={(e) => setSingleGenerateLockTitle(e.target.checked)}
-                        />
-                        <span>{t("write_lock_title_desc")}</span>
-                      </label>
                     </details>
                     <div className="field write-field-mb">
                       <label>{t("write_generate_mode")}</label>
-                      <div className="write-generate-mode-row">
+                      <div className="write-generate-mode-row" role="radiogroup" aria-label={t("write_generate_mode")}>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "foreground" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
+                          role="radio"
+                          aria-checked={generateMode === "foreground"}
+                          className={`write-generate-mode-btn${generateMode === "foreground" ? " is-active" : ""}`}
                           onClick={() => setGenerateMode("foreground")}
                         >
-                          {t("write_foreground_realtime")}
+                          <span className="write-generate-mode-btn__title">{t("write_foreground_realtime")}</span>
+                          <span className="write-generate-mode-btn__desc">{t("write_foreground_realtime_hint")}</span>
                         </button>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "background" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
+                          role="radio"
+                          aria-checked={generateMode === "background"}
+                          className={`write-generate-mode-btn${generateMode === "background" ? " is-active" : ""}`}
                           onClick={() => setGenerateMode("background")}
                         >
-                          {t("write_background_leave")}
+                          <span className="write-generate-mode-btn__title">{t("write_background_leave")}</span>
+                          <span className="write-generate-mode-btn__desc">{t("write_background_brief")}</span>
                         </button>
                       </div>
-                      {generateMode === "background" && (
-                        <p className="muted write-hint-sm--top">
-                          {t("write_background_desc")}
-                        </p>
-                      )}
                     </div>
                     <button
                       type="button"
-                      className="btn btn-primary"
+                      className="btn btn-primary write-generate-submit"
                       disabled={busy}
                       onClick={generateMode === "background" ? () => void onGenerateBackground() : onGenerate}
                     >
@@ -1817,31 +1818,32 @@ export default function NovelWrite() {
                     </div>
                     <div className="field write-field-mb">
                       <label>{t("write_generate_mode")}</label>
-                      <div className="write-generate-mode-row">
+                      <div className="write-generate-mode-row" role="radiogroup" aria-label={t("write_generate_mode")}>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "foreground" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
+                          role="radio"
+                          aria-checked={generateMode === "foreground"}
+                          className={`write-generate-mode-btn${generateMode === "foreground" ? " is-active" : ""}`}
                           onClick={() => setGenerateMode("foreground")}
                         >
-                          {t("write_foreground_realtime")}
+                          <span className="write-generate-mode-btn__title">{t("write_foreground_realtime")}</span>
+                          <span className="write-generate-mode-btn__desc">{t("write_foreground_realtime_hint")}</span>
                         </button>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "background" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
+                          role="radio"
+                          aria-checked={generateMode === "background"}
+                          className={`write-generate-mode-btn${generateMode === "background" ? " is-active" : ""}`}
                           onClick={() => setGenerateMode("background")}
                         >
-                          {t("write_background_leave")}
+                          <span className="write-generate-mode-btn__title">{t("write_background_leave")}</span>
+                          <span className="write-generate-mode-btn__desc">{t("write_background_batch_brief")}</span>
                         </button>
                       </div>
-                      {generateMode === "background" && (
-                        <p className="muted write-hint-sm--top">
-                          {t("write_background_batch_desc")}
-                        </p>
-                      )}
                     </div>
                     <button
                       type="button"
-                      className="btn btn-primary"
+                      className="btn btn-primary write-generate-submit"
                       disabled={busy || !isLatestChapter}
                       onClick={generateMode === "background" ? () => void onBatchGenerateBackground() : onBatchGenerate}
                     >
@@ -1857,7 +1859,6 @@ export default function NovelWrite() {
 
             {rightTool === "rewrite" && activeId ? (
               <div className="write-ai-section">
-                <p className="hint">{t("write_rewrite_hint")}</p>
                 <div className="field write-ai-command-field">
                   <label htmlFor="write-ai-rewrite-instruction">{t("write_rewrite_instruction_label")}</label>
                   <textarea
@@ -1879,7 +1880,6 @@ export default function NovelWrite() {
 
             {rightTool === "append" && activeId ? (
               <div className="write-ai-section">
-                <p className="hint">{t("write_append_hint")}</p>
                 <div className="field write-ai-command-field">
                   <label htmlFor="write-ai-append-instruction">{t("write_append_instruction_label")}</label>
                   <textarea

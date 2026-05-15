@@ -1,49 +1,42 @@
 .ai-assistant-float-btn {
   position: fixed;
-  height: 48px;
-  min-width: 132px;
+  height: 40px;
+  min-width: 112px;
   border-radius: 999px;
-  background: var(--accent, #cc785c);
-  color: #fff;
-  border: 1px solid color-mix(in oklab, var(--accent, #cc785c) 72%, #fff);
+  background: color-mix(in oklab, var(--canvas, #faf9f5) 88%, #fff);
+  color: var(--accent-active, #a9583e);
+  border: 1px solid color-mix(in oklab, var(--accent, #cc785c) 22%, var(--border, #e6dfd8));
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  box-shadow: 0 12px 28px color-mix(in oklab, var(--accent, #cc785c) 26%, transparent);
+  gap: 7px;
+  box-shadow: 0 8px 18px rgba(28, 25, 23, 0.07);
   transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
   z-index: 900;
-  padding: 0 16px 0 12px;
+  padding: 0 12px 0 9px;
   font-family: var(--font-ui);
   isolation: isolate;
   touch-action: none;
 }
 
 .ai-assistant-float-btn::before {
-  content: "";
-  position: absolute;
-  inset: -5px;
-  border-radius: inherit;
-  border: 1px solid color-mix(in oklab, var(--accent, #cc785c) 24%, transparent);
-  opacity: 0.55;
-  animation: ai-assistant-entry-pulse 2.8s ease-in-out infinite;
-  pointer-events: none;
+  content: none;
 }
 
 .ai-assistant-float-btn__label {
   display: inline;
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1;
 }
 
 .ai-assistant-float-btn:hover {
-  transform: translateY(-2px);
-  background: var(--accent-active, #b66850);
-  border-color: color-mix(in oklab, var(--accent, #cc785c) 82%, #fff);
-  box-shadow: 0 16px 34px color-mix(in oklab, var(--accent, #cc785c) 34%, transparent);
+  transform: translateY(-1px);
+  background: color-mix(in oklab, var(--accent, #cc785c) 8%, var(--canvas, #faf9f5));
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 36%, var(--border, #e6dfd8));
+  box-shadow: 0 10px 22px rgba(28, 25, 23, 0.09);
 }
 
 .ai-assistant-float-btn--dragging,
@@ -76,11 +69,11 @@
 }
 
 .ai-assistant-float-btn .ai-assistant-mark {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   color: #fff;
-  background: color-mix(in oklab, #fff 14%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, #fff 28%, transparent);
+  background: var(--accent, #cc785c);
+  box-shadow: none;
 }
 
 .ai-assistant-mark__glyph {
@@ -1045,17 +1038,17 @@ body.ai-assistant-is-dragging {
 [data-theme="dark"] .ai-assistant-float-btn,
 .theme--dark .ai-assistant-float-btn,
 .write-theme--dark .ai-assistant-float-btn {
-  background: var(--accent, #cc785c);
-  color: #fff;
-  border-color: color-mix(in oklab, var(--accent, #cc785c) 64%, #252320);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  background: color-mix(in oklab, var(--canvas, #181715) 88%, #252320);
+  color: color-mix(in oklab, var(--accent, #cc785c) 76%, #fff);
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 24%, #252320);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 
 [data-theme="dark"] .ai-assistant-float-btn:hover,
 .theme--dark .ai-assistant-float-btn:hover,
 .write-theme--dark .ai-assistant-float-btn:hover {
-  background: var(--accent-active, #b66850);
-  border-color: color-mix(in oklab, var(--accent, #cc785c) 74%, #252320);
+  background: color-mix(in oklab, var(--accent, #cc785c) 12%, var(--canvas, #181715));
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 34%, #252320);
 }
 
 [data-theme="dark"] .ai-assistant-header,
@@ -1688,7 +1681,7 @@ body.ai-assistant-is-dragging {
 
 @media (min-width: 1280px) {
   .ai-assistant-float-btn {
-    min-width: 132px;
+    min-width: 112px;
   }
 
   .ai-assistant-float-btn__label {
