@@ -1,4 +1,4 @@
-export type AiTool = "generate" | "rewrite" | "append" | "naming" | "evaluate" | "versions";
+export type AiTool = "generate" | "rewrite" | "append" | "naming" | "versions";
 export type SelectionAiMode = "rewrite" | "expand" | "polish" | "append";
 export type GenerateTab = "single" | "batch";
 export type LineHeightId = "compact" | "normal" | "relaxed" | "loose";

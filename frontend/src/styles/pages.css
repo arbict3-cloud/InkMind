@@ -13,12 +13,12 @@
 .export-modal-panel {
   background: var(--canvas, #faf9f5);
   border: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 86%, transparent);
-  border-radius: 12px;
-  width: min(100%, 540px);
+  border-radius: 14px;
+  width: min(100%, 500px);
   max-height: min(88vh, 680px);
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 42px rgba(28, 25, 23, 0.12);
+  box-shadow: 0 18px 48px rgba(28, 25, 23, 0.14);
   overflow: hidden;
 }
 
@@ -27,14 +27,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 18px 22px 10px;
+  padding: 18px 22px 8px;
   border-bottom: none;
   flex-shrink: 0;
   background: transparent;
 }
 
 .export-modal-body {
-  padding: 12px 22px 18px;
+  padding: 10px 22px 18px;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
@@ -44,7 +44,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 0 22px 20px;
+  padding: 0 22px 18px;
   border-top: none;
   background: transparent;
   flex-shrink: 0;

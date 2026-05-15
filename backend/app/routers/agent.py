@@ -23,7 +23,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.agent.claude_orchestrator import ClaudeOrchestrator, _active_sessions
+from app.agent.agent_tools import set_task_output_override
+from app.agent.claude_orchestrator import (
+    ClaudeOrchestrator,
+    _active_sessions,
+    close_orchestrator_session,
+    interrupt_orchestrator_session,
+)
 from app.agent.task_queue import get_task_queue
 from app.config import settings
 from app.database import SessionLocal, get_db
@@ -58,6 +64,13 @@ class AnswerQuestionRequest(BaseModel):
 
 class BatchTaskStatusRequest(BaseModel):
     task_ids: list[str] = Field(description="任务 ID 列表")
+
+
+class TaskOutputOverrideRequest(BaseModel):
+    session_id: str = Field(description="会话 ID")
+    task_id: str = Field(description="任务 ID")
+    task_type: str = Field(description="任务类型")
+    content: str = Field(description="用户编辑后的内容")
 
 
 def _get_backend(user: object | None = None, db: Session | None = None) -> str:
@@ -204,8 +217,29 @@ async def close_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"会话不存在: {session_id}",
         )
-    orchestrator = ClaudeOrchestrator(SessionLocal, None, None)
-    await orchestrator.close_session(session)
+    await close_orchestrator_session(session)
+    return {"success": True, "session_id": session_id}
+
+
+@router.post("/sessions/{session_id}/interrupt")
+async def interrupt_session(
+    novel_id: int,
+    session_id: str,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    session = _active_sessions.get(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"会话不存在: {session_id}",
+        )
+    if session.novel_id != novel_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="会话不属于该小说",
+        )
+    await interrupt_orchestrator_session(session)
     return {"success": True, "session_id": session_id}
 
 
@@ -241,6 +275,24 @@ async def get_batch_task_status(
             for tid, task in results.items()
         }
     }
+
+
+@router.post("/task-output")
+async def update_task_output(
+    novel_id: int,
+    body: TaskOutputOverrideRequest,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+) -> dict[str, Any]:
+    _get_owned_novel(db, user.id, novel_id)
+    session = _active_sessions.get(body.session_id)
+    if session is None or session.novel_id != novel_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"会话不存在: {body.session_id}",
+        )
+    set_task_output_override(body.session_id, body.task_id, body.task_type, body.content)
+    return {"success": True}
 
 
 @router.post("/tasks/{task_id}/cancel")

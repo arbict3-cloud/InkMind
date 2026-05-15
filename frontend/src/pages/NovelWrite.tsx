@@ -2,6 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useParams, useNavigate } from "react-router-dom";
 import { Modal } from "antd";
 import {
+  CheckCircleOutlined,
+  EditOutlined,
+  ForwardOutlined,
+  RobotOutlined,
+  ThunderboltOutlined,
+} from "@ant-design/icons";
+import {
   apiErrorMessage,
   compareVersionWithCurrent,
   confirmChapterGeneration,
@@ -10,7 +17,6 @@ import {
   createBatchBackgroundTask,
   deleteChapter,
   chapterSelectionAi,
-  createCharacter,
   createMemo,
   evaluateChapter,
   fetchChapterVersions,
@@ -45,6 +51,13 @@ function parseBatchChapterCountInput(value: string): number | null {
   return Math.max(1, Math.min(20, Math.round(n)));
 }
 
+function estimateTextareaRows(value: string, charsPerLine = 62, minRows = 3, maxRows = 9): number {
+  const rows = (value || "").split("\n").reduce((sum, line) => (
+    sum + Math.max(1, Math.ceil((line.trim().length || 1) / charsPerLine))
+  ), 0);
+  return Math.max(minRows, Math.min(maxRows, rows));
+}
+
 export default function NovelWrite() {
   const { novelId } = useParams();
   const id = Number(novelId);
@@ -62,11 +75,24 @@ export default function NovelWrite() {
   const [content, setContent] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [rightTool, setRightTool] = useState<AiTool | null>(null);
+  const [commandPanelPos, setCommandPanelPos] = useState<{ left: number; top: number } | null>(null);
+  const [commandPanelDragging, setCommandPanelDragging] = useState(false);
   const [narrow, setNarrow] = useState(() =>
     typeof window !== "undefined" ? window.innerWidth < 900 : false
   );
   const sidebarToolsRef = useRef<HTMLDivElement | null>(null);
   const bodyTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const commandPanelRef = useRef<HTMLDivElement | null>(null);
+  const selectionPanelRef = useRef<HTMLDivElement | null>(null);
+  const evaluatePanelRef = useRef<HTMLDivElement | null>(null);
+  const commandPanelDragRef = useRef<{
+    startX: number;
+    startY: number;
+    startLeft: number;
+    startTop: number;
+    width: number;
+    height: number;
+  } | null>(null);
 
   const [rewriteInstr, setRewriteInstr] = useState("");
   const [appendInstr, setAppendInstr] = useState("");
@@ -79,6 +105,16 @@ export default function NovelWrite() {
   const [evaluateResult, setEvaluateResult] = useState<{
     issues: { aspect: string; detail: string }[];
     de_ai_score: number;
+  } | null>(null);
+  const [evaluatePanelPos, setEvaluatePanelPos] = useState<{ left: number; top: number } | null>(null);
+  const [evaluatePanelDragging, setEvaluatePanelDragging] = useState(false);
+  const evaluatePanelDragRef = useRef<{
+    startX: number;
+    startY: number;
+    startLeft: number;
+    startTop: number;
+    width: number;
+    height: number;
   } | null>(null);
 
   const [llmOptions, setLlmOptions] = useState<string[]>([]);
@@ -104,6 +140,16 @@ export default function NovelWrite() {
     streaming: string;
   } | null>(null);
   const [selectionMenuPos, setSelectionMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [selectionPanelPos, setSelectionPanelPos] = useState<{ left: number; top: number } | null>(null);
+  const [selectionPanelDragging, setSelectionPanelDragging] = useState(false);
+  const selectionPanelDragRef = useRef<{
+    startX: number;
+    startY: number;
+    startLeft: number;
+    startTop: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const selectionRangeRef = useRef<{ start: number; end: number } | null>(null);
   selectionRangeRef.current = selectionRange;
   const [err, setErr] = useState("");
@@ -138,6 +184,78 @@ export default function NovelWrite() {
 
   const handleToggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
   const handleDrawerClose = useCallback(() => setRightTool(null), []);
+  const handleOpenSmartWriterPrompt = useCallback((prompt: string) => {
+    window.dispatchEvent(new CustomEvent("inkmind:assistant-open", {
+      detail: { novelId: id, prompt },
+    }));
+  }, [id]);
+  const handleCommandPanelDragStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (rightTool === "versions") return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button, textarea, input, select, a")) return;
+    const rect = commandPanelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    event.preventDefault();
+    commandPanelDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    setCommandPanelPos({ left: rect.left, top: rect.top });
+    setCommandPanelDragging(true);
+  }, [rightTool]);
+
+  const handleSelectionPanelDragStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, textarea, input, select, a")) return;
+    const rect = selectionPanelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const startLeft = selectionPanelPos?.left ?? selectionMenuPos?.left ?? rect.left + rect.width / 2;
+    const startTop = selectionPanelPos?.top ?? (selectionMenuPos ? selectionMenuPos.top + 8 : rect.top);
+    event.preventDefault();
+    selectionPanelDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft,
+      startTop,
+      width: rect.width,
+      height: rect.height,
+    };
+    setSelectionPanelPos({ left: startLeft, top: startTop });
+    setSelectionPanelDragging(true);
+  }, [selectionMenuPos, selectionPanelPos]);
+
+  const getEvaluatePanelDefaultPos = useCallback((): { left: number; top: number } => {
+    const margin = 20;
+    const panelWidth = Math.min(440, window.innerWidth - margin * 2);
+    return {
+      left: Math.max(margin, window.innerWidth - panelWidth - 34),
+      top: Math.max(margin, Math.min(132, window.innerHeight - 360)),
+    };
+  }, []);
+
+  const handleEvaluatePanelDragStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, textarea, input, select, a")) return;
+    const rect = evaluatePanelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const startLeft = evaluatePanelPos?.left ?? rect.left;
+    const startTop = evaluatePanelPos?.top ?? rect.top;
+    event.preventDefault();
+    evaluatePanelDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft,
+      startTop,
+      width: rect.width,
+      height: rect.height,
+    };
+    setEvaluatePanelPos({ left: startLeft, top: startTop });
+    setEvaluatePanelDragging(true);
+  }, [evaluatePanelPos]);
 
   const loadChapters = useCallback(async () => {
     const list = await fetchChapters(id);
@@ -153,14 +271,103 @@ export default function NovelWrite() {
   const showBatchInspireCta = !batchSummary.trim();
 
   const wordCount = content.replace(/\s/g, "").length;
-  const charCount = content.length;
-  const paragraphCount = content.split("\n").filter((p) => p.trim()).length;
+  const wordCountText = t("write_version_word_count").replace("{count}", String(wordCount));
+  const summaryRows = useMemo(() => estimateTextareaRows(summary, narrow ? 32 : 78, 3, 9), [summary, narrow]);
 
   useEffect(() => {
     const onResize = () => setNarrow(window.innerWidth < 900);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    if (!commandPanelDragging) return;
+
+    const handleMove = (event: PointerEvent) => {
+      const drag = commandPanelDragRef.current;
+      if (!drag) return;
+      const margin = 12;
+      const maxLeft = Math.max(margin, window.innerWidth - drag.width - margin);
+      const maxTop = Math.max(margin, window.innerHeight - drag.height - margin);
+      setCommandPanelPos({
+        left: Math.min(maxLeft, Math.max(margin, drag.startLeft + event.clientX - drag.startX)),
+        top: Math.min(maxTop, Math.max(margin, drag.startTop + event.clientY - drag.startY)),
+      });
+    };
+    const handleUp = () => {
+      commandPanelDragRef.current = null;
+      setCommandPanelDragging(false);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [commandPanelDragging]);
+
+  useEffect(() => {
+    if (!selectionPanelDragging) return;
+
+    const handleMove = (event: PointerEvent) => {
+      const drag = selectionPanelDragRef.current;
+      if (!drag) return;
+      const margin = 12;
+      const halfWidth = drag.width / 2;
+      const minLeft = margin + halfWidth;
+      const maxLeft = Math.max(minLeft, window.innerWidth - halfWidth - margin);
+      const maxTop = Math.max(margin, window.innerHeight - drag.height - margin);
+      setSelectionPanelPos({
+        left: Math.min(maxLeft, Math.max(minLeft, drag.startLeft + event.clientX - drag.startX)),
+        top: Math.min(maxTop, Math.max(margin, drag.startTop + event.clientY - drag.startY)),
+      });
+    };
+    const handleUp = () => {
+      selectionPanelDragRef.current = null;
+      setSelectionPanelDragging(false);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [selectionPanelDragging]);
+
+  useEffect(() => {
+    if (!evaluatePanelDragging) return;
+
+    const handleMove = (event: PointerEvent) => {
+      const drag = evaluatePanelDragRef.current;
+      if (!drag) return;
+      const margin = 12;
+      const maxLeft = Math.max(margin, window.innerWidth - drag.width - margin);
+      const maxTop = Math.max(margin, window.innerHeight - drag.height - margin);
+      setEvaluatePanelPos({
+        left: Math.min(maxLeft, Math.max(margin, drag.startLeft + event.clientX - drag.startX)),
+        top: Math.min(maxTop, Math.max(margin, drag.startTop + event.clientY - drag.startY)),
+      });
+    };
+    const handleUp = () => {
+      evaluatePanelDragRef.current = null;
+      setEvaluatePanelDragging(false);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, [evaluatePanelDragging]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -328,6 +535,7 @@ export default function NovelWrite() {
     setBatchStreaming("");
     setSelectionRange(null);
     setSelectionPanel(null);
+    setEvaluatePanelPos(null);
   }, [id]);
 
   useEffect(() => {
@@ -339,6 +547,7 @@ export default function NovelWrite() {
     setBatchStreaming("");
     setSelectionRange(null);
     setSelectionPanel(null);
+    setEvaluatePanelPos(null);
   }, [activeId]);
 
   useEffect(() => {
@@ -370,10 +579,11 @@ export default function NovelWrite() {
 
   useEffect(() => {
     if (!busy) return;
+    if (selectionPanel) return;
     const el = bodyTextareaRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [content, busy]);
+  }, [content, busy, selectionPanel]);
 
   const hasBody = (content || "").trim().length > 0;
   const hasLlm = llmOptions.length > 0;
@@ -405,10 +615,32 @@ export default function NovelWrite() {
     setSelectionRange(captureSelection());
   }
 
+  function getSelectionResultAnchor(range: { start: number; end: number }): { left: number; top: number } | null {
+    const ta = bodyTextareaRef.current;
+    if (!ta || range.start === range.end) return null;
+    const startPt = getCaretViewportPoint(ta, range.start);
+    const endPt = getCaretViewportPoint(ta, range.end);
+    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 24;
+    const viewportPadding = 16;
+    const panelWidth = Math.min(440, window.innerWidth - viewportPadding * 2);
+    const halfPanel = panelWidth / 2;
+    const minLeft = viewportPadding + halfPanel;
+    const maxLeft = Math.max(minLeft, window.innerWidth - halfPanel - viewportPadding);
+    const maxTop = Math.max(viewportPadding, window.innerHeight - 260);
+    const selectionCenter = (startPt.left + endPt.left) / 2;
+    return {
+      left: Math.min(maxLeft, Math.max(minLeft, selectionCenter)),
+      top: Math.min(maxTop, Math.max(viewportPadding, Math.max(startPt.top, endPt.top) + lineHeight + 10)),
+    };
+  }
+
   useEffect(() => {
     if (!selectionPanel) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectionPanel(null);
+      if (e.key === "Escape") {
+        setSelectionPanel(null);
+        setSelectionPanelPos(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -430,6 +662,7 @@ export default function NovelWrite() {
       return;
     }
     setErr("");
+    setSelectionPanelPos(getSelectionResultAnchor(r));
     setSelectionPanel({ mode, start: r.start, end: r.end, text: "", streaming: "" });
     setBusy(true);
     try {
@@ -461,6 +694,7 @@ export default function NovelWrite() {
 
   function closeSelectionPanel() {
     setSelectionPanel(null);
+    setSelectionPanelPos(null);
   }
 
   function applySelectionReplace() {
@@ -473,30 +707,9 @@ export default function NovelWrite() {
       return normalizeBodyParagraphIndent(insertion);
     });
     setSelectionPanel(null);
+    setSelectionPanelPos(null);
     setSelectionRange(null);
     setSelectionMenuPos(null);
-  }
-
-  async function addSelectionToCharacter() {
-    const r = selectionRange ?? captureSelection();
-    if (!r || activeId === null) return;
-    const selected = content.slice(r.start, r.end).trim();
-    if (!selected) {
-      setErr(t("write_err_select_text"));
-      return;
-    }
-    const firstLine = selected.split(/\s|\n|，|。|,|\./).find(Boolean) || selected.slice(0, 16);
-    try {
-      await createCharacter(id, {
-        name: firstLine.slice(0, 24),
-        profile: selected,
-        notes: t("write_selection_from_chapter").replace("{title}", title || t("common_untitled")),
-      });
-      setSelectionRange(null);
-      setSelectionMenuPos(null);
-    } catch (e) {
-      setErr(apiErrorMessage(e));
-    }
   }
 
   async function addSelectionToMemo() {
@@ -1231,6 +1444,7 @@ export default function NovelWrite() {
     setEvaluateBusy(true);
     setErr("");
     setEvaluateResult(null);
+    setEvaluatePanelPos(getEvaluatePanelDefaultPos());
     try {
       const data = await evaluateChapter(
         id,
@@ -1255,6 +1469,30 @@ export default function NovelWrite() {
   }
 
   const drawerOpen = Boolean(rightTool && activeId !== null);
+  const drawerTitle = rightTool
+    ? ({
+        generate: t("write_ai_generate"),
+        rewrite: t("write_ai_rewrite"),
+        append: t("write_ai_append"),
+        naming: t("write_ai_naming"),
+        versions: t("write_version_versions"),
+      } satisfies Record<AiTool, string>)[rightTool]
+    : "";
+  const drawerDescription = rightTool
+    ? ({
+        generate: t("write_ai_generate_desc"),
+        rewrite: t("write_ai_rewrite_desc"),
+        append: t("write_ai_append_desc"),
+        naming: t("write_ai_naming_desc"),
+        versions: t("write_version_desc"),
+      } satisfies Record<AiTool, string>)[rightTool]
+    : "";
+  const selectionPanelPosition = selectionPanel && selectionMenuPos
+    ? (selectionPanelPos ?? { left: selectionMenuPos.left, top: selectionMenuPos.top + 8 })
+    : null;
+  const evaluatePanelPosition = evaluateResult
+    ? (evaluatePanelPos ?? getEvaluatePanelDefaultPos())
+    : null;
 
   return (
     <div className={`write-shell write-theme--${theme}${focusMode ? " write-focus-mode" : ""}`}>
@@ -1340,39 +1578,79 @@ export default function NovelWrite() {
                         {saveStatus === "unsaved" && <span className="write-save-dot write-save-dot--unsaved" aria-hidden />}
                         {saveStatus === "saving" ? t("write_saving") : saveStatus === "saved" ? t("write_saved") : t("write_save_unsaved")}
                       </span>
+                      <span className="write-meta-word-stat">{wordCountText}</span>
                     </div>
-                    {!focusMode ? (
-                      <div className="write-chapter-actions" role="group" aria-label={t("write_chapter_actions")}>
-                        <button
-                          type="button"
-                          className="write-chapter-action"
-                          disabled={!hasLlm || evaluateBusy || busy || !activeId}
-                          onClick={() => void onRunEvaluate()}
-                        >
-                          {evaluateBusy ? t("write_evaluating") : t("write_tool_evaluate")}
-                        </button>
-                        <button
-                          type="button"
-                          className={`write-chapter-action${rightTool === "versions" ? " is-active" : ""}`}
-                          disabled={!activeId}
-                          onClick={toggleVersionsPanel}
-                        >
-                          {t("write_tool_versions")}
-                        </button>
-                      </div>
-                    ) : null}
                   </div>
                   {summaryOpen && (
                     <div className="write-summary-panel">
                       <textarea
                         className="textarea write-summary-textarea"
-                        rows={3}
+                        rows={summaryRows}
                         value={summary}
                         onChange={(e) => setSummary(e.target.value)}
                         placeholder={t("write_chapter_summary_placeholder")}
                       />
                     </div>
                   )}
+                  {!focusMode ? (
+                    <div className="write-action-strip">
+                      <div className="write-ai-quickbar" aria-label={t("write_ai_quickbar_label")}>
+                        <span className="write-ai-quickbar__label">{t("write_ai_quickbar_title")}</span>
+                        <button
+                          type="button"
+                          className={`write-ai-quickbtn${rightTool === "generate" ? " is-active" : ""}`}
+                          disabled={!hasLlm || busy}
+                          onClick={() => setRightTool("generate")}
+                        >
+                          <ThunderboltOutlined aria-hidden="true" />
+                          {t("write_ai_quick_generate")}
+                        </button>
+                        <button
+                          type="button"
+                          className={`write-ai-quickbtn${rightTool === "rewrite" ? " is-active" : ""}`}
+                          disabled={!hasLlm || busy || !hasBody}
+                          onClick={() => setRightTool("rewrite")}
+                        >
+                          <EditOutlined aria-hidden="true" />
+                          {t("write_ai_quick_rewrite")}
+                        </button>
+                        <button
+                          type="button"
+                          className={`write-ai-quickbtn${rightTool === "append" ? " is-active" : ""}`}
+                          disabled={!hasLlm || busy}
+                          onClick={() => setRightTool("append")}
+                        >
+                          <ForwardOutlined aria-hidden="true" />
+                          {t("write_ai_quick_continue")}
+                        </button>
+                        <button
+                          type="button"
+                          className="write-ai-quickbtn"
+                          disabled={!hasLlm || evaluateBusy || busy || !activeId}
+                          onClick={() => void onRunEvaluate()}
+                        >
+                          <CheckCircleOutlined aria-hidden="true" />
+                          {evaluateBusy ? t("write_evaluating") : t("write_ai_quick_check")}
+                        </button>
+                        <button
+                          type="button"
+                          className="write-ai-quickbtn write-ai-quickbtn--assistant"
+                          onClick={() => handleOpenSmartWriterPrompt(t("smart_writer_recommend_next_step_prompt"))}
+                        >
+                          <RobotOutlined aria-hidden="true" />
+                          {t("write_ai_quick_ask")}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className={`write-history-btn${rightTool === "versions" ? " is-active" : ""}`}
+                        disabled={!activeId}
+                        onClick={toggleVersionsPanel}
+                      >
+                        {t("write_tool_versions")}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className={`write-body-wrapper write-body-wrapper--${lineWidthId}`}>
                   <div className="field write-body-field">
@@ -1390,50 +1668,8 @@ export default function NovelWrite() {
                     />
                   </div>
                 </div>
-                {evaluateResult ? (
-                  <div className="write-inline-result write-inline-result--eval">
-                    <div className="write-inline-result__head">
-                      <span>{t("write_evaluate_chapter")}</span>
-                      <button type="button" className="write-inline-result__close" onClick={() => setEvaluateResult(null)}>
-                        {t("write_close")}
-                      </button>
-                    </div>
-                    <div className="write-eval-score" aria-label={t("write_deai_score_aria")}>
-                      <span className="write-eval-score-num">{evaluateResult.de_ai_score}</span>
-                      <span className="write-eval-score-denom">/ 100</span>
-                      <span className="muted write-eval-score-label">{t("write_deai_score_desc")}</span>
-                    </div>
-                    {evaluateResult.issues.length > 0 ? (
-                      <ul className="write-eval-issues">
-                        {evaluateResult.issues.map((it, i) => (
-                          <li key={i}>
-                            <strong>{it.aspect}</strong>
-                            <span className="muted">{t("write_eval_issue_separator")}</span>
-                            {it.detail}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="muted">{t("write_evaluate_no_issues")}</p>
-                    )}
-                  </div>
-                ) : null}
-                <div className="write-editor-footer">
-                  <div className="write-word-stats">
-                    <span className="write-word-stat-item">
-                      <span className="write-word-stat-label">{t("write_stat_words")}</span>
-                      <span className="write-word-stat-value">{wordCount}</span>
-                    </span>
-                    <span className="write-word-stat-item">
-                      <span className="write-word-stat-label">{t("write_stat_chars")}</span>
-                      <span className="write-word-stat-value">{charCount}</span>
-                    </span>
-                    <span className="write-word-stat-item">
-                      <span className="write-word-stat-label">{t("write_stat_paragraphs")}</span>
-                      <span className="write-word-stat-value">{paragraphCount}</span>
-                    </span>
-                  </div>
-                  {focusMode ? (
+                {focusMode ? (
+                  <div className="write-editor-footer">
                     <button
                       type="button"
                       className="btn btn-ghost write-exit-focus-btn"
@@ -1441,8 +1677,8 @@ export default function NovelWrite() {
                     >
                       {t("write_exit_focus_mode_esc")}
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
               </>
             ) : (
               <p className="muted write-empty-hint">
@@ -1454,16 +1690,21 @@ export default function NovelWrite() {
       </div>
 
       {!focusMode && drawerOpen && rightTool && (
-        <div className="write-ai-drawer write-version-panel">
-          <div className="write-ai-drawer-head">
-            <span>
-              {rightTool === "generate" && t("write_ai_generate")}
-              {rightTool === "rewrite" && t("write_ai_rewrite")}
-              {rightTool === "append" && t("write_ai_append")}
-              {rightTool === "naming" && t("write_ai_naming")}
-              {rightTool === "evaluate" && t("write_ai_evaluate")}
-              {rightTool === "versions" && t("write_version_versions")}
-            </span>
+        <div
+          ref={commandPanelRef}
+          className={`write-ai-drawer${rightTool === "versions" ? " write-version-panel" : ` write-command-panel write-command-panel--${rightTool}`}${commandPanelDragging ? " is-dragging" : ""}`}
+          style={rightTool !== "versions" && commandPanelPos ? {
+            left: commandPanelPos.left,
+            top: commandPanelPos.top,
+            right: "auto",
+          } : undefined}
+        >
+          <div className="write-ai-drawer-head" onPointerDown={handleCommandPanelDragStart}>
+            <div className="write-ai-drawer-titleblock">
+              <span className="write-ai-drawer-eyebrow">{t("write_ai_panel_eyebrow")}</span>
+              <strong>{drawerTitle}</strong>
+              {drawerDescription ? <small>{drawerDescription}</small> : null}
+            </div>
             <button type="button" className="write-ai-close btn btn-ghost" onClick={() => setRightTool(null)}>
               {t("write_close")}
             </button>
@@ -1471,17 +1712,17 @@ export default function NovelWrite() {
           <div className="write-ai-drawer-body">
             {rightTool === "generate" && activeId ? (
               <div className="write-ai-section">
-                <div className="write-generate-tabs" role="tablist" aria-label={t("write_gen_mode")}>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={generateTab === "single"}
-                    className={`write-generate-tab${generateTab === "single" ? " is-active" : ""}`}
-                    onClick={() => setGenerateTab("single")}
-                  >
-                    {t("write_single_chapter")}
-                  </button>
-                  {isLatestChapter ? (
+                {isLatestChapter ? (
+                  <div className="write-generate-tabs" role="tablist" aria-label={t("write_gen_mode")}>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={generateTab === "single"}
+                      className={`write-generate-tab${generateTab === "single" ? " is-active" : ""}`}
+                      onClick={() => setGenerateTab("single")}
+                    >
+                      {t("write_single_chapter")}
+                    </button>
                     <button
                       type="button"
                       role="tab"
@@ -1491,12 +1732,11 @@ export default function NovelWrite() {
                     >
                       {t("write_batch_chapters")}
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : null}
 
                 {generateTab === "single" ? (
                   <>
-                    <p className="hint">{t("write_gen_for_current")}</p>
                     <div className="field">
                       <div className="write-ai-field-label">
                         <label htmlFor="write-ai-chapter-summary">{t("write_chapter_summary")}</label>
@@ -1532,57 +1772,63 @@ export default function NovelWrite() {
                       <textarea
                         id="write-ai-chapter-summary"
                         className="textarea"
-                        rows={5}
+                        rows={4}
                         value={summary}
                         onChange={(e) => setSummary(e.target.value)}
                         placeholder={t("write_summary_placeholder")}
                       />
                     </div>
-                    <div className="field">
-                      <label htmlFor="write-ai-generate-title">{t("write_generate_title_optional")}</label>
-                      <input
-                        id="write-ai-generate-title"
-                        className="input"
-                        value={singleGenerateTitle}
-                        onChange={(e) => setSingleGenerateTitle(e.target.value)}
-                        placeholder={t("write_title_ai_decide")}
-                      />
-                    </div>
-                    <label className="write-generate-lock">
-                      <input
-                        type="checkbox"
-                        checked={singleGenerateLockTitle}
-                        onChange={(e) => setSingleGenerateLockTitle(e.target.checked)}
-                      />
-                      <span>{t("write_lock_title_desc")}</span>
-                    </label>
+                    <details className="write-generate-advanced">
+                      <summary><span>{t("write_advanced_options")}</span></summary>
+                      <div className="write-generate-advanced__content">
+                        <div className="field">
+                          <label htmlFor="write-ai-generate-title">{t("write_generate_title_optional")}</label>
+                          <input
+                            id="write-ai-generate-title"
+                            className="input"
+                            value={singleGenerateTitle}
+                            onChange={(e) => setSingleGenerateTitle(e.target.value)}
+                            placeholder={t("write_title_ai_decide")}
+                          />
+                        </div>
+                        <label className="write-generate-lock">
+                          <input
+                            type="checkbox"
+                            checked={singleGenerateLockTitle}
+                            onChange={(e) => setSingleGenerateLockTitle(e.target.checked)}
+                          />
+                          <span>{t("write_lock_title_desc")}</span>
+                        </label>
+                      </div>
+                    </details>
                     <div className="field write-field-mb">
                       <label>{t("write_generate_mode")}</label>
-                      <div className="write-generate-mode-row">
+                      <div className="write-generate-mode-row" role="radiogroup" aria-label={t("write_generate_mode")}>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "foreground" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
+                          role="radio"
+                          aria-checked={generateMode === "foreground"}
+                          className={`write-generate-mode-btn${generateMode === "foreground" ? " is-active" : ""}`}
                           onClick={() => setGenerateMode("foreground")}
                         >
-                          {t("write_foreground_realtime")}
+                          <span className="write-generate-mode-btn__title">{t("write_foreground_realtime")}</span>
+                          <span className="write-generate-mode-btn__desc">{t("write_foreground_realtime_hint")}</span>
                         </button>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "background" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
+                          role="radio"
+                          aria-checked={generateMode === "background"}
+                          className={`write-generate-mode-btn${generateMode === "background" ? " is-active" : ""}`}
                           onClick={() => setGenerateMode("background")}
                         >
-                          {t("write_background_leave")}
+                          <span className="write-generate-mode-btn__title">{t("write_background_leave")}</span>
+                          <span className="write-generate-mode-btn__desc">{t("write_background_brief")}</span>
                         </button>
                       </div>
-                      {generateMode === "background" && (
-                        <p className="muted write-hint-sm--top">
-                          {t("write_background_desc")}
-                        </p>
-                      )}
                     </div>
                     <button
                       type="button"
-                      className="btn btn-primary"
+                      className="btn btn-primary write-generate-submit"
                       disabled={busy}
                       onClick={generateMode === "background" ? () => void onGenerateBackground() : onGenerate}
                     >
@@ -1644,7 +1890,6 @@ export default function NovelWrite() {
                   </>
                 ) : (
                   <>
-                    <p className="hint">{t("write_gen_multiple_chapters")}</p>
                     <div className="field">
                       <label htmlFor="write-ai-batch-count">{t("write_chapter_count")}</label>
                       <input
@@ -1703,7 +1948,7 @@ export default function NovelWrite() {
                       <textarea
                         id="write-ai-batch-summary"
                         className="textarea"
-                        rows={7}
+                        rows={5}
                         value={batchSummary}
                         onChange={(e) => setBatchSummary(e.target.value)}
                         placeholder={t("write_batch_summary_placeholder")}
@@ -1711,31 +1956,32 @@ export default function NovelWrite() {
                     </div>
                     <div className="field write-field-mb">
                       <label>{t("write_generate_mode")}</label>
-                      <div className="write-generate-mode-row">
+                      <div className="write-generate-mode-row" role="radiogroup" aria-label={t("write_generate_mode")}>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "foreground" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
+                          role="radio"
+                          aria-checked={generateMode === "foreground"}
+                          className={`write-generate-mode-btn${generateMode === "foreground" ? " is-active" : ""}`}
                           onClick={() => setGenerateMode("foreground")}
                         >
-                          {t("write_foreground_realtime")}
+                          <span className="write-generate-mode-btn__title">{t("write_foreground_realtime")}</span>
+                          <span className="write-generate-mode-btn__desc">{t("write_foreground_realtime_hint")}</span>
                         </button>
                         <button
                           type="button"
-                          className={`btn ${generateMode === "background" ? "btn-primary" : "btn-ghost"} write-generate-mode-btn`}
+                          role="radio"
+                          aria-checked={generateMode === "background"}
+                          className={`write-generate-mode-btn${generateMode === "background" ? " is-active" : ""}`}
                           onClick={() => setGenerateMode("background")}
                         >
-                          {t("write_background_leave")}
+                          <span className="write-generate-mode-btn__title">{t("write_background_leave")}</span>
+                          <span className="write-generate-mode-btn__desc">{t("write_background_batch_brief")}</span>
                         </button>
                       </div>
-                      {generateMode === "background" && (
-                        <p className="muted write-hint-sm--top">
-                          {t("write_background_batch_desc")}
-                        </p>
-                      )}
                     </div>
                     <button
                       type="button"
-                      className="btn btn-primary"
+                      className="btn btn-primary write-generate-submit"
                       disabled={busy || !isLatestChapter}
                       onClick={generateMode === "background" ? () => void onBatchGenerateBackground() : onBatchGenerate}
                     >
@@ -1751,33 +1997,43 @@ export default function NovelWrite() {
 
             {rightTool === "rewrite" && activeId ? (
               <div className="write-ai-section">
-                <p className="hint">{t("write_rewrite_hint")}</p>
-                <textarea
-                  className="textarea"
-                  rows={5}
-                  value={rewriteInstr}
-                  onChange={(e) => setRewriteInstr(e.target.value)}
-                  placeholder={t("write_rewrite_placeholder")}
-                />
-                <button type="button" className="btn btn-primary" disabled={busy} onClick={onRunRewrite}>
-                  {busy ? t("write_processing") : t("write_rewrite")}
-                </button>
+                <div className="field write-ai-command-field">
+                  <label htmlFor="write-ai-rewrite-instruction">{t("write_rewrite_instruction_label")}</label>
+                  <textarea
+                    id="write-ai-rewrite-instruction"
+                    className="textarea"
+                    rows={5}
+                    value={rewriteInstr}
+                    onChange={(e) => setRewriteInstr(e.target.value)}
+                    placeholder={t("write_rewrite_placeholder")}
+                  />
+                </div>
+                <div className="write-ai-command-actions">
+                  <button type="button" className="btn btn-primary" disabled={busy} onClick={onRunRewrite}>
+                    {busy ? t("write_processing") : t("write_rewrite")}
+                  </button>
+                </div>
               </div>
             ) : null}
 
             {rightTool === "append" && activeId ? (
               <div className="write-ai-section">
-                <p className="hint">{t("write_append_hint")}</p>
-                <textarea
-                  className="textarea"
-                  rows={5}
-                  value={appendInstr}
-                  onChange={(e) => setAppendInstr(e.target.value)}
-                  placeholder={t("write_append_placeholder")}
-                />
-                <button type="button" className="btn btn-primary" disabled={busy} onClick={onRunAppend}>
-                  {busy ? t("write_processing") : t("write_append")}
-                </button>
+                <div className="field write-ai-command-field">
+                  <label htmlFor="write-ai-append-instruction">{t("write_append_instruction_label")}</label>
+                  <textarea
+                    id="write-ai-append-instruction"
+                    className="textarea"
+                    rows={5}
+                    value={appendInstr}
+                    onChange={(e) => setAppendInstr(e.target.value)}
+                    placeholder={t("write_append_placeholder")}
+                  />
+                </div>
+                <div className="write-ai-command-actions">
+                  <button type="button" className="btn btn-primary" disabled={busy} onClick={onRunAppend}>
+                    {busy ? t("write_processing") : t("write_append")}
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -1834,48 +2090,6 @@ export default function NovelWrite() {
                         {name}
                       </button>
                     ))}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {rightTool === "evaluate" && activeId ? (
-              <div className="write-ai-section">
-                <p className="hint">
-                {t("write_evaluate_title")}
-                </p>
-                <p className="muted write-eval-hint">
-                </p>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={evaluateBusy || busy}
-                  onClick={() => void onRunEvaluate()}
-                >
-                  {evaluateBusy ? t("write_evaluating") : t("write_evaluate_chapter")}
-                </button>
-                {evaluateResult ? (
-                  <div className="write-eval-block">
-                    <div className="write-eval-score" aria-label={t("write_deai_score_aria")}>
-                      <span className="write-eval-score-num">{evaluateResult.de_ai_score}</span>
-                      <span className="write-eval-score-denom">/ 100</span>
-                      <span className="muted write-eval-score-label">{t("write_deai_score_desc")}</span>
-                    </div>
-                    {evaluateResult.issues.length === 0 ? (
-                      <p className="muted write-eval-no-issues">
-                        {t("write_evaluate_no_issues")}
-                      </p>
-                    ) : (
-                      <ul className="write-eval-issues-inline stack-sm">
-                        {evaluateResult.issues.map((it, i) => (
-                          <li key={i} className="write-eval-issue-item">
-                            <strong>{it.aspect}</strong>
-                            <span className="muted">{t("write_eval_issue_separator")}</span>
-                            {it.detail}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
                   </div>
                 ) : null}
               </div>
@@ -2028,30 +2242,89 @@ export default function NovelWrite() {
         </div>
       )}
 
+      {evaluateResult && evaluatePanelPosition ? (
+        <div
+          ref={evaluatePanelRef}
+          className={`write-evaluate-panel${evaluatePanelDragging ? " is-dragging" : ""}`}
+          role="dialog"
+          aria-label={t("write_ai_check_result_title")}
+          style={{ left: evaluatePanelPosition.left, top: evaluatePanelPosition.top }}
+        >
+          <div className="write-evaluate-panel__head" onPointerDown={handleEvaluatePanelDragStart}>
+            <div className="write-evaluate-panel__title">
+              <span className="write-evaluate-panel__badge">AI</span>
+              <div>
+                <strong>{t("write_ai_check_result_title")}</strong>
+                <small>
+                  {evaluateResult.issues.length > 0
+                    ? t("write_ai_check_issue_count").replace("{count}", String(evaluateResult.issues.length))
+                    : t("write_evaluate_no_issues")}
+                </small>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="write-evaluate-panel__close"
+              onClick={() => {
+                setEvaluateResult(null);
+                setEvaluatePanelPos(null);
+              }}
+            >
+              {t("write_close")}
+            </button>
+          </div>
+          <div className="write-evaluate-panel__body">
+            <div className="write-evaluate-panel__score" aria-label={t("write_deai_score_aria")}>
+              <span className="write-evaluate-panel__score-num">{evaluateResult.de_ai_score}</span>
+              <span className="write-evaluate-panel__score-denom">/ 100</span>
+              <span className="write-evaluate-panel__score-label">{t("write_deai_score_desc")}</span>
+            </div>
+            {evaluateResult.issues.length > 0 ? (
+              <div className="write-evaluate-panel__issues" aria-label={t("write_evaluate_issues")}>
+                {evaluateResult.issues.map((it, i) => (
+                  <article key={`${it.aspect}-${i}`} className="write-evaluate-panel__issue">
+                    <span className="write-evaluate-panel__issue-index">{i + 1}</span>
+                    <div>
+                      <strong>{it.aspect}</strong>
+                      <p>{it.detail}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="write-evaluate-panel__empty">{t("write_no_issues_found")}</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {showSelectionBar && selectionMenuPos ? (
         <SelectionFloatMenu
           top={selectionMenuPos.top}
           left={selectionMenuPos.left}
           busy={busy}
           onRunAi={(mode) => void runSelectionAi(mode)}
-          onAddToCharacter={() => void addSelectionToCharacter()}
           onAddToMemo={() => void addSelectionToMemo()}
         />
       ) : null}
 
-      {selectionPanel && selectionMenuPos ? (
+      {selectionPanel && selectionPanelPosition ? (
         <div
-          className="write-selection-result-float"
+          ref={selectionPanelRef}
+          className={`write-selection-result-float${selectionPanelDragging ? " is-dragging" : ""}`}
           role="status"
-          style={{ top: selectionMenuPos.top + 8, left: selectionMenuPos.left }}
+          style={{ top: selectionPanelPosition.top, left: selectionPanelPosition.left }}
         >
-          <div className="write-selection-result-float__head">
-            <span>
-              {selectionPanel.mode === "rewrite" && t("write_selection_rewrite_title")}
-              {selectionPanel.mode === "expand" && t("write_selection_expand_title")}
-              {selectionPanel.mode === "polish" && t("write_selection_polish_title")}
-              {selectionPanel.mode === "append" && t("write_selection_append_title")}
-            </span>
+          <div className="write-selection-result-float__head" onPointerDown={handleSelectionPanelDragStart}>
+            <div className="write-selection-result-float__title">
+              <span className="write-selection-result-float__badge">AI</span>
+              <span>
+                {selectionPanel.mode === "rewrite" && t("write_selection_rewrite_title")}
+                {selectionPanel.mode === "expand" && t("write_selection_expand_title")}
+                {selectionPanel.mode === "polish" && t("write_selection_polish_title")}
+                {selectionPanel.mode === "append" && t("write_selection_append_title")}
+              </span>
+            </div>
             <button type="button" className="write-selection-result-float__close" onClick={closeSelectionPanel}>
               {t("write_selection_exit")}
             </button>

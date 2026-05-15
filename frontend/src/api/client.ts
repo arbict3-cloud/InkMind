@@ -1211,13 +1211,41 @@ export async function agentAnswerQuestion(
   questionId: string,
   answer: string,
   selectedOption?: string,
-): Promise<void> {
-  await api.post(`/novels/${novelId}/agent/answer-question`, {
+): Promise<{ status: string; resolved: boolean; synthetic?: boolean }> {
+  const { data } = await api.post<{ status: string; resolved: boolean; synthetic?: boolean }>(`/novels/${novelId}/agent/answer-question`, {
     session_id: sessionId,
     question_id: questionId,
     answer,
     selected_option: selectedOption ?? null,
   });
+  return data;
+}
+
+export async function updateAgentTaskOutput(
+  novelId: number,
+  sessionId: string,
+  taskId: string,
+  taskType: string,
+  content: string,
+): Promise<{ success: boolean }> {
+  const { data } = await api.post<{ success: boolean }>(`/novels/${novelId}/agent/task-output`, {
+    session_id: sessionId,
+    task_id: taskId,
+    task_type: taskType,
+    content,
+  });
+  return data;
+}
+
+export async function interruptAgentSession(
+  novelId: number,
+  sessionId: string,
+): Promise<{ success: boolean; session_id: string }> {
+  const { data } = await api.post<{ success: boolean; session_id: string }>(
+    `/novels/${novelId}/agent/sessions/${sessionId}/interrupt`,
+    {}
+  );
+  return data;
 }
 
 export async function getAgentSession(

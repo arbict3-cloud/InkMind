@@ -12,15 +12,16 @@ Qwen/Minimax/DeepSeek 等模型作为专业执行者，
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
-from typing import Any, Iterator
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.agent.memory import NovelMemory
-from app.agent.task_queue import AgentTask, AgentTaskQueue, get_task_queue
+from app.agent.task_queue import AgentTask, AgentTaskQueue, AgentTaskStatus, get_task_queue
 from app.config import settings
 from app.language import Language
 from app.llm.base import LLMProvider, calc_max_tokens_from_word_count
@@ -35,6 +36,9 @@ _BG_MAX = 2200
 _WRITING_STYLE_MAX = 700
 _SUMMARY_LINE_MAX = 320
 _TASK_SUMMARY_MAX = 2800
+_PLACEHOLDER_SUMMARY_RE = re.compile(
+    r"(本章没有正文|没有正文|暂无正文|占位内容|待补充|无正文|无法生成摘要|未提供正文)"
+)
 
 
 def _clip(s: str | None, n: int) -> str:
@@ -42,6 +46,12 @@ def _clip(s: str | None, n: int) -> str:
     if len(t) <= n:
         return t
     return t[: n - 1] + "…"
+
+
+def _stream_display_pieces(text: str) -> list[str]:
+    if not text:
+        return []
+    return re.findall(r".{1,10}(?:[，。！？；：、,.!?;:]|$)|\s+|.{1,10}", text, flags=re.S)
 
 
 def _strip_code_fence(raw: str) -> str:
@@ -101,6 +111,32 @@ def _format_context_pack(pack: dict[str, Any]) -> str:
             lines.append(f"- {_clip(str(note), 180)}")
 
     return "\n".join(line for line in lines if line.strip())
+
+
+def _fallback_summary_from_context(context_pack: dict[str, Any], instruction: str = "") -> str:
+    recent = context_pack.get("recent_chapter_summaries", [])
+    last_title = ""
+    last_summary = ""
+    if isinstance(recent, list) and recent:
+        last = recent[0] if isinstance(recent[0], dict) else {}
+        last_title = str(last.get("title") or "")
+        last_summary = str(last.get("summary") or "")
+
+    foreshadowing = context_pack.get("foreshadowing", [])
+    clue = ""
+    if isinstance(foreshadowing, list) and foreshadowing:
+        first = foreshadowing[0] if isinstance(foreshadowing[0], dict) else {}
+        clue = str(first.get("title") or first.get("body") or "")
+
+    base = instruction or last_summary or "承接上一章冲突，推动主角做出新的选择，并在结尾留下下一步悬念。"
+    pieces = [
+        f"承接上一章{f'《{last_title}》' if last_title else ''}的局势，围绕“{_clip(base, 120)}”展开。",
+        "本章需要明确核心冲突、人物行动和情绪转折，让剧情从余波进入新的对抗。",
+    ]
+    if clue:
+        pieces.append(f"可回收或推进线索：{_clip(clue, 120)}。")
+    pieces.append("结尾保留一个清晰钩子，为后续正文生成提供方向。")
+    return "".join(pieces)
 
 
 def _infer_expand_target_word_count(instruction: str, current_length: int) -> int | None:
@@ -163,6 +199,29 @@ class SubAgentExecutor:
             action=action,
         )
 
+    async def _collect_streaming_text(
+        self,
+        task: AgentTask,
+        chunks: Any,
+        *,
+        json_body_only: bool = False,
+        progress_message: str = "正在生成正文...",
+    ) -> str:
+        raw_parts: list[str] = []
+        body_streamer = _JsonBodyStreamer() if json_body_only else None
+        for chunk in chunks:
+            if task.status == AgentTaskStatus.CANCELLED:
+                raise asyncio.CancelledError()
+            raw_parts.append(chunk)
+            visible = body_streamer.feed(chunk) if body_streamer else chunk
+            if visible:
+                task.progress_message = progress_message
+                for piece in _stream_display_pieces(visible):
+                    await task.publish_stream_event({"type": "delta", "content": piece})
+                    if len(piece) >= 6:
+                        await asyncio.sleep(0.004)
+        return "".join(raw_parts)
+
     async def execute_generate_chapter(self, task: AgentTask) -> dict[str, Any]:
         params = task.params
         chapter_summary = params.get("chapter_summary", "")
@@ -200,8 +259,12 @@ class SubAgentExecutor:
             get_prompt("gen_user_warning", self._language)
         )
 
-        raw = "".join(filter_think_chunks(
-            llm.stream_complete(system, user, max_tokens=calc_max_tokens_from_word_count(word_count, language=self._language))
+        raw = (await self._collect_streaming_text(
+            task,
+            filter_think_chunks(
+                llm.stream_complete(system, user, max_tokens=calc_max_tokens_from_word_count(word_count, language=self._language))
+            ),
+            json_body_only=True,
         )).strip()
         text = _strip_code_fence(raw)
 
@@ -227,19 +290,69 @@ class SubAgentExecutor:
 
     async def execute_generate_summary(self, task: AgentTask) -> dict[str, Any]:
         params = task.params
-        chapter_content = params.get("chapter_content", "")
-        chapter_title = params.get("chapter_title", "")
+        chapter_content = (params.get("chapter_content") or "").strip()
+        chapter_title = (params.get("chapter_title") or "").strip()
+        context_pack = params.get("context_pack") if isinstance(params.get("context_pack"), dict) else None
+        instruction = str(
+            params.get("chapter_summary_hint")
+            or params.get("instruction")
+            or params.get("summary_hint")
+            or ""
+        ).strip()
 
         llm = self._resolve_llm(params.get("sub_agent_provider"), "AI助手生成摘要")
-        system = get_prompt("summarize_body_system", self._language)
-        title_display = chapter_title or get_prompt("common_none", self._language)
-        user_msg = get_prompt(
-            "summarize_body_user",
-            self._language,
-            title=title_display,
-            content=chapter_content[:8000],
-        )
-        summary = llm.complete(system, user_msg).strip()
+        if chapter_content:
+            system = get_prompt("summarize_body_system", self._language)
+            title_display = chapter_title or get_prompt("common_none", self._language)
+            user_msg = get_prompt(
+                "summarize_body_user",
+                self._language,
+                title=title_display,
+                content=chapter_content[:8000],
+            )
+        else:
+            if not context_pack:
+                memory = NovelMemory(self._db, self._novel)
+                context_text = memory.build_context(instruction)
+                context_pack = {}
+            else:
+                context_text = _format_context_pack(context_pack)
+            system = (
+                "你是小说章节规划助手。请基于作品上下文生成下一章的可执行章节摘要。"
+                "不要声称缺少正文，不要输出占位内容。"
+            )
+            user_msg = (
+                f"{context_text}\n\n"
+                "【任务】生成下一章摘要，而不是总结已有正文。\n"
+                f"用户/总指挥给出的方向：{instruction or '承接上一章自然推进'}\n\n"
+                "要求：\n"
+                "1. 120-260字。\n"
+                "2. 包含本章核心冲突、人物行动、情绪/关系变化和结尾悬念。\n"
+                "3. 可以给出标题倾向，但不要写成正文。\n"
+                "4. 禁止输出“本章没有正文”“占位内容”“待补充”等无效内容。\n"
+            )
+        chunks = filter_think_chunks(llm.stream_complete(system, user_msg))
+        if chapter_content:
+            summary = (await self._collect_streaming_text(
+                task,
+                chunks,
+                progress_message="正在生成章节摘要...",
+            )).strip()
+        else:
+            raw_parts: list[str] = []
+            for chunk in chunks:
+                if task.status == AgentTaskStatus.CANCELLED:
+                    raise asyncio.CancelledError()
+                raw_parts.append(chunk)
+            summary = "".join(raw_parts).strip()
+        if not summary or _PLACEHOLDER_SUMMARY_RE.search(summary):
+            summary = _fallback_summary_from_context(context_pack or {}, instruction)
+        if not chapter_content:
+            task.progress_message = "正在生成章节摘要..."
+            for piece in _stream_display_pieces(summary):
+                await task.publish_stream_event({"type": "delta", "content": piece})
+                if len(piece) >= 6:
+                    await asyncio.sleep(0.004)
 
         return {"summary": summary}
 
@@ -275,7 +388,6 @@ class SubAgentExecutor:
             return {"error": f"章节 {chapter_id} 不存在"}
 
         llm = self._resolve_llm(params.get("sub_agent_provider"), "AI助手改写章节")
-        from app.services.chapter_llm import revise_chapter_body
         current_length = len(chapter.content or "")
         target_word_count = _infer_expand_target_word_count(str(requested_word_count or instruction), current_length)
         final_instruction = instruction
@@ -286,14 +398,23 @@ class SubAgentExecutor:
                 "必须显著扩充正文，不要只替换场景或缩写原文；请保留原有主线，增加环境、动作、心理、对话和冲突推进细节。"
             )
 
-        revised = revise_chapter_body(llm, self._novel, chapter, final_instruction, language=self._language, target_word_count=target_word_count)
+        from app.services.chapter_llm import messages_revise_chapter_body
+        system, user = messages_revise_chapter_body(self._novel, chapter, final_instruction, language=self._language)
+        revised = (await self._collect_streaming_text(
+            task,
+            filter_think_chunks(llm.stream_complete(system, user, max_tokens=calc_max_tokens_from_word_count(target_word_count, language=self._language))),
+        )).strip()
         if target_word_count and len(revised) < max(int(target_word_count * 0.85), int(current_length * 1.25)):
             retry_instruction = (
                 f"{final_instruction}\n\n"
                 f"上一次输出只有约 {len(revised)} 字，仍然偏短。请重新扩写，目标至少 {target_word_count} 字；"
                 "不要改成另一个无关场景，不要删减原有剧情信息。"
             )
-            revised = revise_chapter_body(llm, self._novel, chapter, retry_instruction, language=self._language, target_word_count=target_word_count)
+            system, user = messages_revise_chapter_body(self._novel, chapter, retry_instruction, language=self._language)
+            revised = (await self._collect_streaming_text(
+                task,
+                filter_think_chunks(llm.stream_complete(system, user, max_tokens=calc_max_tokens_from_word_count(target_word_count, language=self._language))),
+            )).strip()
 
         return {
             "revised_content": revised,
@@ -311,8 +432,14 @@ class SubAgentExecutor:
             return {"error": f"章节 {chapter_id} 不存在"}
 
         llm = self._resolve_llm(params.get("sub_agent_provider"), "AI助手续写章节")
-        from app.services.chapter_llm import append_chapter_body
-        appended = append_chapter_body(llm, self._novel, chapter, instruction, language=self._language)
+        from app.services.chapter_llm import messages_append_chapter_body
+        system, user = messages_append_chapter_body(self._novel, chapter, instruction, language=self._language)
+        addition = (await self._collect_streaming_text(
+            task,
+            filter_think_chunks(llm.stream_complete(system, user)),
+        )).strip()
+        existing = (chapter.content or "").strip()
+        appended = addition if not existing else existing.rstrip() + "\n\n" + addition
 
         return {"appended_content": appended}
 
@@ -352,3 +479,55 @@ def register_sub_agent_handlers(
     queue.register_handler("naming", executor.execute_naming)
 
     return executor
+
+
+class _JsonBodyStreamer:
+    """Extract the JSON string field named body while chunks arrive."""
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._in_body = False
+        self._escaping = False
+
+    def feed(self, chunk: str) -> str:
+        self._buffer += chunk
+        if not self._in_body:
+            marker_idx = self._buffer.find('"body"')
+            if marker_idx < 0:
+                self._buffer = self._buffer[-16:]
+                return ""
+            colon_idx = self._buffer.find(":", marker_idx + len('"body"'))
+            if colon_idx < 0:
+                self._buffer = self._buffer[marker_idx:]
+                return ""
+            quote_idx = self._buffer.find('"', colon_idx + 1)
+            if quote_idx < 0:
+                self._buffer = self._buffer[colon_idx:]
+                return ""
+            self._buffer = self._buffer[quote_idx + 1:]
+            self._in_body = True
+
+        out: list[str] = []
+        consumed = 0
+        for idx, ch in enumerate(self._buffer):
+            consumed = idx + 1
+            if self._escaping:
+                if ch == "n":
+                    out.append("\n")
+                elif ch == "t":
+                    out.append("\t")
+                elif ch == "r":
+                    out.append("\r")
+                else:
+                    out.append(ch)
+                self._escaping = False
+                continue
+            if ch == "\\":
+                self._escaping = True
+                continue
+            if ch == '"':
+                self._in_body = False
+                break
+            out.append(ch)
+        self._buffer = self._buffer[consumed:]
+        return "".join(out)

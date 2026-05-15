@@ -13,6 +13,7 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
   const [customInput, setCustomInput] = useState("");
   const [selectedOption, setSelectedOption] = useState<QuestionOption | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
+  const [answers, setAnswers] = useState<Record<number, string>>({});
 
   const steps = useMemo<QuestionItem[]>(() => {
     if (question.questions && question.questions.length > 0) {
@@ -57,32 +58,72 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
   const hasOptions = displayOptions.length > 0;
   const showCustomInput = question.allow_custom !== false || normalizedOptions.length === 0;
 
+  const cleanOptionLabel = (label: string) => (
+    label
+      .replace(/\s*[\(（]\s*recommended\s*[\)）]\s*$/i, "")
+      .trim()
+  );
+
+  const currentAnswer = selectedOption ? cleanOptionLabel(selectedOption.label) : customInput.trim();
+  const canProceed = Boolean(currentAnswer);
+
+  const buildAnswerPayload = (nextAnswers: Record<number, string>) => {
+    if (!isMultiStep) return nextAnswers[currentStep] || "";
+
+    const keyedAnswers = steps.reduce<Record<string, string>>((acc, step, idx) => {
+      const key = step.question || `${idx + 1}`;
+      const answer = nextAnswers[idx];
+      if (answer) acc[key] = answer;
+      return acc;
+    }, {});
+
+    return JSON.stringify(keyedAnswers);
+  };
+
+  const buildDisplayAnswer = (nextAnswers: Record<number, string>) => {
+    if (!isMultiStep) return nextAnswers[currentStep] || "";
+
+    return steps
+      .map((step, idx) => {
+        const answer = nextAnswers[idx];
+        if (!answer) return "";
+        return `${step.header || step.question || `${idx + 1}`}: ${answer}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+  };
+
   const handleOptionClick = (opt: QuestionOption) => {
+    if (disabled) return;
     setSelectedOption(opt);
     setCustomInput("");
-    const cleanLabel = opt.label
-      .replace(/\s*[\(（]\s*recommended\s*[\)）]\s*$/i, "")
-      .trim();
-    if (isLastStep) {
-      onAnswer(question.question_id, cleanLabel, cleanLabel);
+    const cleanLabel = cleanOptionLabel(opt.label);
+    const nextAnswers = { ...answers, [currentStep]: cleanLabel };
+    if (currentStep < steps.length - 1) {
+      setAnswers(nextAnswers);
+      setSelectedOption(null);
+      setCurrentStep(currentStep + 1);
+    } else {
+      onAnswer(question.question_id, buildAnswerPayload(nextAnswers), buildDisplayAnswer(nextAnswers));
     }
   };
 
   const handleCustomSubmit = () => {
-    if (customInput.trim()) {
-      onAnswer(question.question_id, customInput.trim());
-    }
+    if (!customInput.trim()) return;
+    const nextAnswers = { ...answers, [currentStep]: customInput.trim() };
+    onAnswer(question.question_id, buildAnswerPayload(nextAnswers), buildDisplayAnswer(nextAnswers));
   };
 
   const handleNextStep = () => {
-    if (!selectedOption && !customInput.trim()) return;
-    const answer = selectedOption?.label || customInput.trim();
+    if (!canProceed) return;
+    const nextAnswers = { ...answers, [currentStep]: currentAnswer };
     if (currentStep < steps.length - 1) {
+      setAnswers(nextAnswers);
       setSelectedOption(null);
       setCustomInput("");
       setCurrentStep(currentStep + 1);
     } else {
-      onAnswer(question.question_id, answer, selectedOption?.label);
+      onAnswer(question.question_id, buildAnswerPayload(nextAnswers), buildDisplayAnswer(nextAnswers));
     }
   };
 
@@ -150,8 +191,8 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
           <button
             type="button"
             className="ai-assistant-question__submit"
-            onClick={isLastStep ? handleCustomSubmit : handleNextStep}
-            disabled={disabled || !customInput.trim()}
+            onClick={isMultiStep ? handleNextStep : handleCustomSubmit}
+            disabled={disabled || !canProceed}
           >
             {isLastStep ? t("ai_question_submit") : t("ai_question_next")}
           </button>
@@ -178,7 +219,7 @@ export default function AskUserQuestion({ question, onAnswer, disabled }: AskUse
             type="button"
             className="ai-assistant-question__nav-btn ai-assistant-question__nav-btn--next"
             onClick={handleNextStep}
-            disabled={disabled || (!selectedOption && !customInput.trim())}
+            disabled={disabled || !canProceed}
           >
             {isLastStep ? t("ai_question_submit") : t("ai_question_next")}
           </button>

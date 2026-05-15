@@ -19,9 +19,11 @@ export interface SsePatchData {
 }
 
 export interface SseDeltaData {
-  type: "text" | "thinking" | "input_json";
+  type: "text" | "thinking" | "input_json" | "task_text";
   content: string;
   message_id?: string;
+  task_id?: string;
+  task_type?: string;
   ts: number;
 }
 
@@ -64,7 +66,7 @@ export interface SseAgentStepData {
   thought?: string;
   result_preview?: string;
   phase_id?: string;
-  phase_status?: "pending" | "running" | "done" | "error";
+  phase_status?: "pending" | "running" | "done" | "error" | "cancelled";
   phase_title?: string;
   phase_detail?: string;
   step_number?: number;

@@ -137,6 +137,8 @@ def _load_workflow_state(workflow_id: str) -> WorkflowState:
     return _active_workflows[workflow_id]
 
 
+### workflow 原属于AI生成组件；当前该组件在前端被移除；
+### 目前workflow相关代码前端都已无入口，属于半废弃状态
 @router.post("/create")
 def create_workflow(
     novel_id: int,

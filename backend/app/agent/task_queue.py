@@ -42,6 +42,8 @@ class AgentTask:
     error: str | None = None
     progress: float = 0.0
     progress_message: str | None = None
+    stream_events: list[dict[str, Any]] = field(default_factory=list)
+    stream_subscribers: list[asyncio.Queue[dict[str, Any]]] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
     completed_at: float | None = None
@@ -62,6 +64,23 @@ class AgentTask:
             "completed_at": self.completed_at,
         }
 
+    async def publish_stream_event(self, event: dict[str, Any]) -> None:
+        payload = {
+            "task_id": self.task_id,
+            "task_type": self.task_type,
+            "seq": len(self.stream_events),
+            "ts": time.time(),
+            **event,
+        }
+        self.stream_events.append(payload)
+        for subscriber in list(self.stream_subscribers):
+            await subscriber.put(payload)
+
+    async def close_stream(self) -> None:
+        await self.publish_stream_event({"type": "done"})
+        for subscriber in list(self.stream_subscribers):
+            await subscriber.put({"type": "closed", "task_id": self.task_id})
+
 
 TaskHandler = Callable[[AgentTask], Awaitable[dict[str, Any]]]
 
@@ -79,6 +98,7 @@ class AgentTaskQueue:
         self._queue: asyncio.Queue[AgentTask] = asyncio.Queue(maxsize=max_queue_size)
         self._tasks: dict[str, AgentTask] = {}
         self._handlers: dict[str, TaskHandler] = {}
+        self._submission_subscribers: dict[str, list[asyncio.Queue[AgentTask]]] = {}
         self._workers: list[asyncio.Task] = []
         self._max_workers = max_workers
         self._running = False
@@ -123,6 +143,9 @@ class AgentTaskQueue:
 
         async with self._lock:
             self._tasks[task_id] = task
+            if caller_id:
+                for subscriber in list(self._submission_subscribers.get(caller_id, [])):
+                    await subscriber.put(task)
 
         await self._queue.put(task)
         log.info("Task submitted: %s (type=%s)", task_id, task_type)
@@ -136,6 +159,47 @@ class AgentTaskQueue:
         async with self._lock:
             return {tid: self._tasks.get(tid) for tid in task_ids}
 
+    async def subscribe_stream(self, task_id: str) -> asyncio.Queue[dict[str, Any]] | None:
+        async with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            task.stream_subscribers.append(queue)
+            for event in task.stream_events:
+                await queue.put(event)
+            if task.status in (AgentTaskStatus.COMPLETED, AgentTaskStatus.FAILED, AgentTaskStatus.CANCELLED):
+                await queue.put({"type": "closed", "task_id": task.task_id})
+            return queue
+
+    async def unsubscribe_stream(self, task_id: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
+        async with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return
+            try:
+                task.stream_subscribers.remove(queue)
+            except ValueError:
+                pass
+
+    async def subscribe_submissions(self, caller_id: str) -> asyncio.Queue[AgentTask]:
+        queue: asyncio.Queue[AgentTask] = asyncio.Queue()
+        async with self._lock:
+            self._submission_subscribers.setdefault(caller_id, []).append(queue)
+        return queue
+
+    async def unsubscribe_submissions(self, caller_id: str, queue: asyncio.Queue[AgentTask]) -> None:
+        async with self._lock:
+            subscribers = self._submission_subscribers.get(caller_id)
+            if not subscribers:
+                return
+            try:
+                subscribers.remove(queue)
+            except ValueError:
+                pass
+            if not subscribers:
+                self._submission_subscribers.pop(caller_id, None)
+
     async def cancel(self, task_id: str) -> bool:
         async with self._lock:
             task = self._tasks.get(task_id)
@@ -145,6 +209,8 @@ class AgentTaskQueue:
                 return False
             task.status = AgentTaskStatus.CANCELLED
             task.completed_at = time.time()
+            await task.publish_stream_event({"type": "error", "error": "任务已中断"})
+            await task.close_stream()
             return True
 
     async def cleanup(self, max_age_seconds: float = 3600) -> int:
@@ -191,16 +257,20 @@ class AgentTaskQueue:
                 task.result = result
                 task.progress = 1.0
                 task.completed_at = time.time()
+                await task.close_stream()
                 log.info("Task %s completed", task.task_id)
             except asyncio.CancelledError:
                 task.status = AgentTaskStatus.CANCELLED
                 task.completed_at = time.time()
+                await task.close_stream()
                 break
             except Exception as e:
                 log.exception("Task %s failed", task.task_id)
                 task.status = AgentTaskStatus.FAILED
                 task.error = str(e)
                 task.completed_at = time.time()
+                await task.publish_stream_event({"type": "error", "error": str(e)})
+                await task.close_stream()
 
 
 _global_queue: AgentTaskQueue | None = None

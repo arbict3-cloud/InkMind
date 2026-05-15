@@ -45,22 +45,30 @@
 
 /* Modal / Confirm */
 .ant-modal-root .ant-modal-mask {
-  background: rgba(20, 20, 19, 0.24) !important;
-  backdrop-filter: blur(5px);
+  background: rgba(20, 20, 19, 0.26) !important;
+  backdrop-filter: blur(6px);
+}
+
+.ant-modal {
+  max-width: calc(100vw - 32px);
+}
+
+.ant-modal-confirm {
+  width: min(340px, calc(100vw - 32px)) !important;
 }
 
 .ant-modal .ant-modal-content {
   padding: 0 !important;
   overflow: hidden;
-  border-radius: 12px !important;
+  border-radius: 14px !important;
   border: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 86%, transparent);
   background: var(--canvas, #faf9f5) !important;
-  box-shadow: 0 16px 42px rgba(28, 25, 23, 0.12) !important;
+  box-shadow: 0 18px 48px rgba(28, 25, 23, 0.14) !important;
 }
 
 .ant-modal .ant-modal-header {
   margin: 0 !important;
-  padding: 18px 22px 10px !important;
+  padding: 18px 22px 8px !important;
   border-bottom: none;
   background: transparent !important;
 }
@@ -73,14 +81,18 @@
 }
 
 .ant-modal .ant-modal-body {
-  padding: 12px 22px 18px !important;
+  padding: 10px 22px 18px !important;
   color: var(--ink-secondary, #3d3b36);
   line-height: 1.7;
 }
 
+.ant-modal-confirm .ant-modal-body {
+  padding: 0 !important;
+}
+
 .ant-modal .ant-modal-footer {
   margin: 0 !important;
-  padding: 0 22px 20px !important;
+  padding: 0 22px 18px !important;
   border-top: none;
   background: transparent;
 }
@@ -98,24 +110,29 @@
 }
 
 .ant-modal-confirm .ant-modal-confirm-body-wrapper {
-  padding: 20px 22px 0;
+  padding: 24px;
 }
 
 .ant-modal-confirm .ant-modal-confirm-body {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 26px minmax(0, 1fr);
+  column-gap: 12px;
   align-items: start;
+}
+
+.ant-modal-confirm .ant-modal-confirm-paragraph {
+  width: 100% !important;
+  max-width: none !important;
 }
 
 .ant-modal-confirm .ant-modal-confirm-body > .anticon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   margin-inline-end: 0 !important;
-  margin-top: 1px;
+  margin-top: 0;
   border-radius: 8px;
   color: var(--accent, #cc785c) !important;
   background: color-mix(in oklab, var(--accent, #cc785c) 10%, transparent);
@@ -125,28 +142,36 @@
   color: var(--ink, #141413) !important;
   font-size: 0.98rem !important;
   font-weight: 650 !important;
+  line-height: 1.35 !important;
 }
 
 .ant-modal-confirm .ant-modal-confirm-content {
   color: var(--ink-secondary, #3d3b36) !important;
-  line-height: 1.7;
-  margin-top: 6px !important;
+  font-size: 0.9rem !important;
+  line-height: 1.65;
+  margin-top: 10px !important;
+  max-width: 260px;
 }
 
 .ant-modal-confirm .ant-modal-confirm-btns {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 18px !important;
-  padding: 0 0 20px;
+  margin-top: 22px !important;
+  padding: 0;
   border-top: none;
+}
+
+.ant-modal-confirm .ant-modal-confirm-btns .ant-btn {
+  min-width: 68px;
 }
 
 .ant-modal .ant-btn {
   border-radius: 8px;
   height: 34px;
-  padding-inline: 14px;
+  padding-inline: 15px;
   box-shadow: none;
+  font-weight: 600;
 }
 
 .ant-modal .ant-btn-primary {
