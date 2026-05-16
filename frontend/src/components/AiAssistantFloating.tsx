@@ -54,6 +54,7 @@ interface AgentMessage {
   role: "user" | "assistant" | "system" | "error" | "chapter_saved";
   content: string;
   attachments?: UploadedAttachment[];
+  selectionContext?: EditorSelectionContext;
   postTaskContent?: string;
   timestamp: number;
   isStreaming?: boolean;
@@ -843,6 +844,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       role: "user",
       content: displayText,
       attachments: messageAttachments,
+      selectionContext: messageSelection ?? undefined,
       timestamp: Date.now(),
     }]);
 
@@ -1341,12 +1343,26 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
               <div key={msg.id} className={`agent-message agent-message-${msg.role}`}>
                 {msg.role === "user" ? (
                   <div className="agent-message-content agent-message-content--user">
+                    {msg.selectionContext?.text.trim() && (
+                      <div className="agent-message-selection">
+                        <div className="agent-message-selection__label">
+                          <FileTextOutlined />
+                          <span>
+                            {msg.selectionContext.chapterTitle?.trim() || t("agent_selection_reference")}
+                            <span className="agent-message-selection__count">
+                              {t("agent_selection_lines").replace("{count}", String(msg.selectionContext.lineCount || 1))}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="agent-message-selection__text">{msg.selectionContext.text}</div>
+                      </div>
+                    )}
                     <div>{msg.content}</div>
                     {!!msg.attachments?.length && (
                       <div className="agent-message-attachments">
                         {msg.attachments.map((file) => (
                           <span key={file.id} className="agent-message-attachment">
-                            <PaperClipOutlined />
+                            {file.kind === "chapter" ? <FileTextOutlined /> : <PaperClipOutlined />}
                             {file.name}
                           </span>
                         ))}
@@ -1492,15 +1508,6 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
                   ))}
                 </div>
               )}
-              {editorSelection?.text.trim() && (
-                <div className="agent-selection-context">
-                  <FileTextOutlined />
-                  <span>{t("agent_selection_lines").replace("{count}", String(editorSelection.lineCount || 1))}</span>
-                  <button type="button" onClick={() => setEditorSelection(null)} aria-label={t("agent_selection_clear")}>
-                    <CloseOutlined />
-                  </button>
-                </div>
-              )}
               <textarea
                 ref={inputRef}
                 className="agent-input"
@@ -1561,6 +1568,15 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
                       </div>
                     )}
                   </div>
+                  {editorSelection?.text.trim() && (
+                    <div className="agent-selection-context">
+                      <FileTextOutlined />
+                      <span>{t("agent_selection_lines").replace("{count}", String(editorSelection.lineCount || 1))}</span>
+                      <button type="button" onClick={() => setEditorSelection(null)} aria-label={t("agent_selection_clear")}>
+                        <CloseOutlined />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <input
                   ref={fileInputRef}

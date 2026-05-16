@@ -151,6 +151,7 @@ export default function NovelWrite() {
     height: number;
   } | null>(null);
   const selectionRangeRef = useRef<{ start: number; end: number } | null>(null);
+  const preserveSelectionForAssistantRef = useRef(false);
   selectionRangeRef.current = selectionRange;
   const [err, setErr] = useState("");
 
@@ -339,6 +340,22 @@ export default function NovelWrite() {
       window.removeEventListener("pointercancel", handleUp);
     };
   }, [selectionPanelDragging]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      const shouldPreserve = Boolean(target?.closest(".ai-assistant-panel, .ai-assistant-float-btn"));
+      preserveSelectionForAssistantRef.current = shouldPreserve;
+      if (shouldPreserve && selectionRangeRef.current) {
+        const preserved = selectionRangeRef.current;
+        window.setTimeout(() => {
+          bodyTextareaRef.current?.setSelectionRange(preserved.start, preserved.end);
+        }, 0);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    return () => window.removeEventListener("pointerdown", handlePointerDown, true);
+  }, []);
 
   useEffect(() => {
     if (!evaluatePanelDragging) return;
@@ -631,6 +648,14 @@ export default function NovelWrite() {
 
   function syncSelectionFromTextarea() {
     const range = captureSelection();
+    if (!range && preserveSelectionForAssistantRef.current && selectionRangeRef.current) {
+      const preserved = selectionRangeRef.current;
+      setSelectionRange(preserved);
+      window.setTimeout(() => {
+        bodyTextareaRef.current?.setSelectionRange(preserved.start, preserved.end);
+      }, 0);
+      return;
+    }
     setSelectionRange(range);
     if (!range || activeId === null) {
       window.dispatchEvent(new CustomEvent("inkmind:editor-selection", {
