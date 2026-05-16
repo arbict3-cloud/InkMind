@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useState, useRef } from "react";
+import {
+  BookOutlined,
+  CheckOutlined,
+  CloseOutlined,
+  CommentOutlined,
+  DownOutlined,
+  FileTextOutlined,
+  PaperClipOutlined,
+  PlusOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useI18n } from "@/i18n";
 import {
+  fetchNovels,
+  fetchChapters,
   createAgentSession,
   agentChat,
   agentAnswerQuestion,
@@ -13,12 +26,35 @@ import {
 import type { PendingQuestionData, SseAgentStepData, SseChapterSavedData } from "@/types/sse";
 import AskUserQuestion from "@/components/AskUserQuestion";
 import AgentStepDisplay from "@/components/AgentStepDisplay";
-import type { Chapter } from "@/types";
+import type { Chapter, Novel } from "@/types";
+
+interface UploadedAttachment {
+  id: string;
+  kind: "file" | "chapter";
+  name: string;
+  size: number;
+  type: string;
+  content?: string;
+  truncated?: boolean;
+  chapterId?: number;
+}
+
+interface EditorSelectionContext {
+  novelId: number;
+  chapterId: number | null;
+  chapterTitle?: string;
+  text: string;
+  lineCount: number;
+  start?: number;
+  end?: number;
+}
 
 interface AgentMessage {
   id: string;
   role: "user" | "assistant" | "system" | "error" | "chapter_saved";
   content: string;
+  attachments?: UploadedAttachment[];
+  selectionContext?: EditorSelectionContext;
   postTaskContent?: string;
   timestamp: number;
   isStreaming?: boolean;
@@ -53,6 +89,8 @@ const MIN_PANEL_WIDTH = 380;
 const MAX_PANEL_WIDTH = 980;
 const MIN_PANEL_HEIGHT = 420;
 const PANEL_MARGIN = 18;
+const MAX_ATTACHMENT_CHARS = 64000;
+const MAX_TOTAL_ATTACHMENT_CHARS = 160000;
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
@@ -68,6 +106,39 @@ function loadJson<T>(key: string, fallback: T): T {
 
 function saveJson(key: string, value: unknown): void {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function isLikelyTextFile(file: File): boolean {
+  if (file.type.startsWith("text/")) return true;
+  return /\.(txt|md|markdown|json|csv|tsv|yaml|yml|xml|html|css|js|jsx|ts|tsx|py|java|go|rs|rb|php|sql|log)$/i.test(file.name);
+}
+
+function buildAttachmentPrompt(input: string, attachments: UploadedAttachment[]): string {
+  if (!attachments.length) return input;
+  let remaining = MAX_TOTAL_ATTACHMENT_CHARS;
+  const files = attachments.map((file, index) => {
+    const label = file.kind === "chapter" ? "章节" : "文件";
+    const meta = `${label} ${index + 1}: ${file.name}${file.kind === "file" ? ` (${formatFileSize(file.size)}${file.type ? `, ${file.type}` : ""})` : ""}`;
+    if (!file.content) return `${meta}\n内容: 无法读取为文本，请仅参考文件名和类型。`;
+    const content = file.content.slice(0, Math.max(0, remaining));
+    remaining -= content.length;
+    const suffix = file.truncated || file.content.length > content.length ? "\n[内容已截断]" : "";
+    return `${meta}\n内容:\n${content}${suffix}`;
+  }).join("\n\n---\n\n");
+
+  return `${input || "请结合我添加的上下文提供帮助。"}\n\n[附加上下文]\n${files}`;
+}
+
+function buildEditorSelectionPrompt(input: string, selection: EditorSelectionContext | null): string {
+  if (!selection?.text.trim()) return input;
+  const title = selection.chapterTitle?.trim() ? `（${selection.chapterTitle.trim()}）` : "";
+  return `${input || "请结合我选中的正文提供帮助。"}\n\n[正文选区上下文]\n章节${title}\n${selection.text}`;
 }
 
 function clampPanelWidth(width: number): number {
@@ -312,16 +383,21 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const { t } = useI18n();
 
   const [isOpen, setIsOpen] = useState(false);
+  const [novels, setNovels] = useState<Novel[]>([]);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [selectedNovelId, setSelectedNovelId] = useState<number | undefined>(novelId);
   const [session, setSession] = useState<AgentSession | null>(null);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [agentSteps, setAgentSteps] = useState<SseAgentStepData[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionData | null>(null);
   const [status, setStatus] = useState<string>("idle");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const initializedRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const activeAssistantIdRef = useRef<string>("");
   const activeRunIdRef = useRef(0);
   const activeAbortRef = useRef<AbortController | null>(null);
@@ -340,10 +416,79 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const [isPanelResizing, setIsPanelResizing] = useState(false);
   const [isPanelDragging, setIsPanelDragging] = useState(false);
   const [isIconDragging, setIsIconDragging] = useState(false);
+  const [isWorkMenuOpen, setIsWorkMenuOpen] = useState(false);
+  const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false);
+  const [isChapterMenuOpen, setIsChapterMenuOpen] = useState(false);
+  const [editorSelection, setEditorSelection] = useState<EditorSelectionContext | null>(null);
+  const activeNovelId = selectedNovelId ?? novelId;
+  const activeNovel = novels.find((item) => item.id === activeNovelId);
+  const activeNovelTitle = activeNovel?.title || (activeNovelId ? t("common_untitled") : t("agent_select_work"));
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, agentSteps]);
+
+  useEffect(() => {
+    if (!isWorkMenuOpen && !isUploadMenuOpen && !isChapterMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (composerRef.current?.contains(event.target as Node)) return;
+      setIsWorkMenuOpen(false);
+      setIsUploadMenuOpen(false);
+      setIsChapterMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [isWorkMenuOpen, isUploadMenuOpen, isChapterMenuOpen]);
+
+  useEffect(() => {
+    const handleSelection = (event: Event) => {
+      const detail = (event as CustomEvent<EditorSelectionContext>).detail;
+      if (!detail || detail.novelId !== activeNovelId || !detail.text?.trim()) {
+        setEditorSelection(null);
+        return;
+      }
+      setEditorSelection(detail);
+      setIsUploadMenuOpen(false);
+      setIsWorkMenuOpen(false);
+      setIsChapterMenuOpen(false);
+    };
+    window.addEventListener("inkmind:editor-selection", handleSelection);
+    return () => window.removeEventListener("inkmind:editor-selection", handleSelection);
+  }, [activeNovelId]);
+
+  useEffect(() => {
+    setSelectedNovelId(novelId);
+  }, [novelId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetchNovels()
+      .then((list) => {
+        if (cancelled) return;
+        setNovels(list);
+        if (!novelId && !selectedNovelId && list[0]?.id) {
+          setSelectedNovelId(list[0].id);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNovels([]);
+      });
+    return () => { cancelled = true; };
+  }, [isOpen, novelId, selectedNovelId]);
+
+  useEffect(() => {
+    if (!isOpen || !activeNovelId) return;
+    let cancelled = false;
+    fetchChapters(activeNovelId)
+      .then((list) => {
+        if (!cancelled) setChapters(list);
+      })
+      .catch(() => {
+        if (!cancelled) setChapters([]);
+      });
+    return () => { cancelled = true; };
+  }, [isOpen, activeNovelId]);
 
   useEffect(() => {
     document.body.classList.toggle("ai-assistant-is-resizing", isPanelResizing);
@@ -501,6 +646,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     const handleOpen = (event: Event) => {
       const detail = (event as CustomEvent<{ novelId?: number; prompt?: string }>).detail;
       if (detail?.novelId && novelId && detail.novelId !== novelId) return;
+      if (detail?.novelId && !novelId) setSelectedNovelId(detail.novelId);
       setIsOpen(true);
       if (detail?.prompt) {
         setInput(detail.prompt);
@@ -512,30 +658,33 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   }, [novelId]);
 
   useEffect(() => {
-    if (!isOpen || !novelId || initializedRef.current) return;
-    initializedRef.current = true;
-    const stored = loadJson<{ session_id: string; novel_id: number } | null>(`${SESSION_KEY}_${novelId}`, null);
-    if (stored?.session_id && stored.novel_id === novelId) {
-      setSession(stored as AgentSession);
-    }
-  }, [isOpen, novelId]);
+    if (!isOpen || !activeNovelId) return;
+    const stored = loadJson<{ session_id: string; novel_id: number } | null>(`${SESSION_KEY}_${activeNovelId}`, null);
+    setSession(stored?.session_id && stored.novel_id === activeNovelId ? stored as AgentSession : null);
+    setMessages([]);
+    setAgentSteps([]);
+    setPendingQuestion(null);
+    setAttachments([]);
+    setEditorSelection(null);
+    setStatus("idle");
+  }, [isOpen, activeNovelId]);
 
   const ensureSession = useCallback(async () => {
     if (session) return session;
     return await createNewSession();
-  }, [session, novelId]);
+  }, [session, activeNovelId]);
 
   const createNewSession = useCallback(async () => {
-    const s = await createAgentSession(novelId!);
+    const s = await createAgentSession(activeNovelId!);
     setSession(s);
-    saveJson(`${SESSION_KEY}_${novelId}`, s);
+    saveJson(`${SESSION_KEY}_${activeNovelId}`, s);
     return s;
-  }, [novelId]);
+  }, [activeNovelId]);
 
   const resetSession = useCallback(() => {
     setSession(null);
-    try { localStorage.removeItem(`${SESSION_KEY}_${novelId}`); } catch { /* ignore */ }
-  }, [novelId]);
+    try { localStorage.removeItem(`${SESSION_KEY}_${activeNovelId}`); } catch { /* ignore */ }
+  }, [activeNovelId]);
 
   const buildChatHandlers = useCallback((aid: string, runId: number) => {
     activeAssistantIdRef.current = aid;
@@ -672,9 +821,17 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || isLoading || !novelId) return;
+    if ((!text && attachments.length === 0 && !editorSelection?.text.trim()) || isLoading || !activeNovelId) return;
+    const messageAttachments = attachments;
+    const messageSelection = editorSelection?.text.trim() ? editorSelection : null;
+    const messageForAgent = buildAttachmentPrompt(
+      buildEditorSelectionPrompt(text, messageSelection),
+      messageAttachments,
+    );
+    const displayText = text || (messageSelection ? t("agent_selection_user_message") : t("agent_attachment_user_message"));
 
     setInput("");
+    setAttachments([]);
     setIsLoading(true);
     setPendingQuestion(null);
     setAgentSteps([]);
@@ -682,7 +839,14 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     const runId = activeRunIdRef.current + 1;
     activeRunIdRef.current = runId;
 
-    setMessages((prev) => [...stopStreamingMessages(prev), { id: generateId(), role: "user", content: text, timestamp: Date.now() }]);
+    setMessages((prev) => [...stopStreamingMessages(prev), {
+      id: generateId(),
+      role: "user",
+      content: displayText,
+      attachments: messageAttachments,
+      selectionContext: messageSelection ?? undefined,
+      timestamp: Date.now(),
+    }]);
 
     try {
       const cur = await ensureSession();
@@ -704,7 +868,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 	              const retryHandlers = buildChatHandlers(aid, runId);
 	              const retryController = new AbortController();
 	              activeAbortRef.current = retryController;
-	              const retryConn = await agentChat(novelId, newSess.session_id, text, retryHandlers, { signal: retryController.signal });
+	              const retryConn = await agentChat(activeNovelId, newSess.session_id, messageForAgent, retryHandlers, { signal: retryController.signal });
                 if (activeRunIdRef.current !== runId) {
                   retryConn.close();
                   return;
@@ -723,7 +887,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 
 	      const controller = new AbortController();
 	      activeAbortRef.current = controller;
-	      const conn = await agentChat(novelId, cur.session_id, text, retryOnError, { signal: controller.signal });
+	      const conn = await agentChat(activeNovelId, cur.session_id, messageForAgent, retryOnError, { signal: controller.signal });
         if (activeRunIdRef.current !== runId) {
           conn.close();
           return;
@@ -734,10 +898,10 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
       setIsLoading(false);
     }
-  }, [input, isLoading, novelId, ensureSession, resetSession, createNewSession, buildChatHandlers]);
+  }, [input, attachments, editorSelection, isLoading, activeNovelId, ensureSession, resetSession, createNewSession, buildChatHandlers, t]);
 
   const handleInterrupt = useCallback(async () => {
-    if (!isLoading || !novelId || !session) return;
+    if (!isLoading || !activeNovelId || !session) return;
     activeRunIdRef.current += 1;
     activeCloseRef.current?.();
     activeAbortRef.current?.abort();
@@ -753,7 +917,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       { id: generateId(), role: "system", content: t("agent_interrupted"), timestamp: Date.now() },
     ]);
     try {
-      await interruptAgentSession(novelId, session.session_id);
+      await interruptAgentSession(activeNovelId, session.session_id);
     } catch (err) {
       setMessages((prev) => [...prev, {
         id: generateId(),
@@ -762,10 +926,10 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         timestamp: Date.now(),
       }]);
     }
-  }, [isLoading, novelId, session, t]);
+  }, [isLoading, activeNovelId, session, t]);
 
   const handleAnswerQuestion = useCallback(async (questionId: string, answer: string, selectedOption?: string) => {
-    if (!session || !pendingQuestion) return;
+    if (!session || !pendingQuestion || !activeNovelId) return;
     setPendingQuestion(null);
     setIsLoading(true);
     setStatus("running");
@@ -783,7 +947,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     ]);
 
     try {
-	      const result = await agentAnswerQuestion(novelId!, session.session_id, questionId, answer, selectedOption);
+	      const result = await agentAnswerQuestion(activeNovelId!, session.session_id, questionId, answer, selectedOption);
         if (activeRunIdRef.current !== runId) return;
 	      if (!result.resolved) {
           const fallbackRunId = activeRunIdRef.current + 1;
@@ -791,7 +955,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 	        const handlers = buildChatHandlers(newAid, fallbackRunId);
 	        const controller = new AbortController();
 	        activeAbortRef.current = controller;
-	        const conn = await agentChat(novelId!, session.session_id, answerText, handlers, { signal: controller.signal });
+	        const conn = await agentChat(activeNovelId!, session.session_id, answerText, handlers, { signal: controller.signal });
           if (activeRunIdRef.current !== fallbackRunId) {
             conn.close();
             return;
@@ -803,7 +967,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
       setIsLoading(false);
     }
-  }, [session, pendingQuestion, novelId, buildChatHandlers]);
+  }, [session, pendingQuestion, activeNovelId, buildChatHandlers]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -857,11 +1021,11 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   }, [updateTaskSection]);
 
   const handleApplyTaskSectionEdit = useCallback(async (messageId: string, section: AgentTaskSection) => {
-    if (!novelId || !session) return;
+    if (!activeNovelId || !session) return;
     const content = (section.draftContent ?? section.content).trim();
     updateTaskSection(messageId, section.taskId, (current) => ({ ...current, saving: true }));
     try {
-      await updateAgentTaskOutput(novelId, session.session_id, section.taskId, section.taskType, content);
+      await updateAgentTaskOutput(activeNovelId, session.session_id, section.taskId, section.taskType, content);
       updateTaskSection(messageId, section.taskId, (current) => ({
         ...current,
         content,
@@ -879,7 +1043,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
         timestamp: Date.now(),
       }]);
     }
-  }, [novelId, session, t, updateTaskSection]);
+  }, [activeNovelId, session, t, updateTaskSection]);
 
   const handleContinueAfterSaved = useCallback(() => {
     setInput(t("smart_writer_suggestion_1"));
@@ -892,6 +1056,151 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     setTimeout(() => inputRef.current?.focus(), 0);
   }, [isLoading]);
 
+  const handleNewConversation = useCallback(async () => {
+    if (!activeNovelId) return;
+    const sessionToInterrupt = session;
+    activeRunIdRef.current += 1;
+    activeCloseRef.current?.();
+    activeAbortRef.current?.abort();
+    activeCloseRef.current = null;
+    activeAbortRef.current = null;
+    answeringQuestionRef.current = false;
+    setIsLoading(false);
+    setPendingQuestion(null);
+    setAgentSteps([]);
+    setMessages([]);
+    setInput("");
+    setAttachments([]);
+    setEditorSelection(null);
+    setStatus("idle");
+    setSession(null);
+    try { localStorage.removeItem(`${SESSION_KEY}_${activeNovelId}`); } catch { /* ignore */ }
+    if (sessionToInterrupt) {
+      try { await interruptAgentSession(activeNovelId, sessionToInterrupt.session_id); } catch { /* ignore */ }
+    }
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [activeNovelId, session]);
+
+  const handleNovelSelect = useCallback((nextId: number) => {
+    if (!Number.isFinite(nextId) || isLoading) return;
+    setSelectedNovelId(nextId);
+    setIsWorkMenuOpen(false);
+    setIsUploadMenuOpen(false);
+    setIsChapterMenuOpen(false);
+    setEditorSelection(null);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [isLoading]);
+
+  const handleToggleWorkMenu = useCallback(() => {
+    if (isLoading || novels.length === 0) return;
+    setIsUploadMenuOpen(false);
+    setIsChapterMenuOpen(false);
+    setIsWorkMenuOpen((open) => !open);
+  }, [isLoading, novels.length]);
+
+  const handleToggleUploadMenu = useCallback(() => {
+    if (isLoading) return;
+    setIsWorkMenuOpen(false);
+    setIsChapterMenuOpen(false);
+    setIsUploadMenuOpen((open) => !open);
+  }, [isLoading]);
+
+  const handleOpenFilePicker = useCallback(() => {
+    setIsUploadMenuOpen(false);
+    setIsChapterMenuOpen(false);
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleOpenChapterMenu = useCallback(() => {
+    setIsUploadMenuOpen(false);
+    setIsWorkMenuOpen(false);
+    setIsChapterMenuOpen(true);
+  }, []);
+
+  const handleAddChapterContext = useCallback((chapter: Chapter, index: number) => {
+    const title = `${t("write_chapter_n")}${index + 1}${t("write_chapter_n_suffix")}${chapter.title?.trim() ? ` ${chapter.title.trim()}` : ""}`;
+    const body = [
+      chapter.summary?.trim() ? `概要：${chapter.summary.trim()}` : "",
+      chapter.content?.trim() ? `正文：\n${chapter.content.trim()}` : "",
+    ].filter(Boolean).join("\n\n");
+    setAttachments((prev) => {
+      if (prev.some((item) => item.kind === "chapter" && item.chapterId === chapter.id)) return prev;
+      return [...prev, {
+        id: generateId(),
+        kind: "chapter" as const,
+        chapterId: chapter.id,
+        name: title,
+        size: body.length,
+        type: "chapter/context",
+        content: body,
+        truncated: false,
+      }].slice(0, 8);
+    });
+    setIsChapterMenuOpen(false);
+    setInput((current) => current.replace(/@\s*$/, ""));
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [t]);
+
+  const handleUploadFiles = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+
+    const nextAttachments = await Promise.all(files.map(async (file) => {
+      const attachment: UploadedAttachment = {
+        id: generateId(),
+        kind: "file",
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      };
+      if (!isLikelyTextFile(file)) return attachment;
+      try {
+        const raw = await file.text();
+        return {
+          ...attachment,
+          content: raw.slice(0, MAX_ATTACHMENT_CHARS),
+          truncated: raw.length > MAX_ATTACHMENT_CHARS,
+        };
+      } catch {
+        return attachment;
+      }
+    }));
+
+    setAttachments((prev) => [...prev, ...nextAttachments].slice(0, 6));
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((file) => file.id !== id));
+  }, []);
+
+  const shouldOpenChapterMenuFromInput = useCallback((value: string, cursor: number) => {
+    const index = Math.max(0, Math.min(value.length, cursor) - 1);
+    return value[index] === "@" || value.endsWith("@");
+  }, []);
+
+  const handleInputChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = event.target.value;
+    setInput(value);
+    const cursor = event.target.selectionStart;
+    if (shouldOpenChapterMenuFromInput(value, cursor)) {
+      setIsUploadMenuOpen(false);
+      setIsWorkMenuOpen(false);
+      setIsChapterMenuOpen(true);
+    }
+  }, [shouldOpenChapterMenuFromInput]);
+
+  const handleInputKeyUp = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const value = event.currentTarget.value;
+    const cursor = event.currentTarget.selectionStart;
+    if (event.key === "@" || shouldOpenChapterMenuFromInput(value, cursor)) {
+      setIsUploadMenuOpen(false);
+      setIsWorkMenuOpen(false);
+      setIsChapterMenuOpen(true);
+    }
+  }, [shouldOpenChapterMenuFromInput]);
+
   const handlePanelResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>, mode: PanelResizeMode) => {
     event.preventDefault();
     event.stopPropagation();
@@ -901,7 +1210,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 
   const handlePanelDragStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
-    if (target.closest("button, textarea, input, a")) return;
+    if (target.closest("button, textarea, input, select, label, a")) return;
     event.preventDefault();
     dragRef.current = { startX: event.clientX, startY: event.clientY, startRect: panelRect };
     setIsPanelDragging(true);
@@ -965,7 +1274,25 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
               <span>{t("smart_writer_title")}</span>
               {status === "running" && <span className="ai-assistant-header__status-dot" />}
             </div>
-            <button type="button" className="ai-assistant-header__close" onClick={() => setIsOpen(false)}>×</button>
+            <div className="ai-assistant-header__actions">
+              <button
+                type="button"
+                className="ai-assistant-icon-btn ai-assistant-icon-btn--tooltip"
+                onClick={handleNewConversation}
+                disabled={!activeNovelId}
+                data-tooltip={t("agent_new_conversation")}
+                title={t("agent_new_conversation")}
+                aria-label={t("agent_new_conversation")}
+              >
+                <span className="ai-assistant-icon-stack" aria-hidden="true">
+                  <CommentOutlined />
+                  <PlusOutlined />
+                </span>
+              </button>
+              <button type="button" className="ai-assistant-header__close" onClick={() => setIsOpen(false)} aria-label={t("common_cancel")}>
+                <CloseOutlined />
+              </button>
+            </div>
           </div>
 
           {agentSteps.length > 0 && (
@@ -1015,7 +1342,33 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
               return (
               <div key={msg.id} className={`agent-message agent-message-${msg.role}`}>
                 {msg.role === "user" ? (
-                  <div className="agent-message-content agent-message-content--user">{msg.content}</div>
+                  <div className="agent-message-content agent-message-content--user">
+                    {msg.selectionContext?.text.trim() && (
+                      <div className="agent-message-selection">
+                        <div className="agent-message-selection__label">
+                          <FileTextOutlined />
+                          <span>
+                            {msg.selectionContext.chapterTitle?.trim() || t("agent_selection_reference")}
+                            <span className="agent-message-selection__count">
+                              {t("agent_selection_lines").replace("{count}", String(msg.selectionContext.lineCount || 1))}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="agent-message-selection__text">{msg.selectionContext.text}</div>
+                      </div>
+                    )}
+                    <div>{msg.content}</div>
+                    {!!msg.attachments?.length && (
+                      <div className="agent-message-attachments">
+                        {msg.attachments.map((file) => (
+                          <span key={file.id} className="agent-message-attachment">
+                            {file.kind === "chapter" ? <FileTextOutlined /> : <PaperClipOutlined />}
+                            {file.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ) : msg.role === "error" ? (
                   <div className="agent-message-content agent-message-content--error">{msg.content}</div>
                 ) : msg.role === "chapter_saved" && msg.savedChapter ? (
@@ -1133,30 +1486,156 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
           )}
 
           <div className="agent-input-container">
-            <textarea
-              ref={inputRef}
-              className="agent-input"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={t("agent_chat_placeholder")}
-              disabled={isLoading}
-            />
-	            <button
-	              className={`agent-send-btn${isLoading ? " agent-send-btn--stop" : ""}`}
-	              onClick={isLoading ? handleInterrupt : handleSend}
-	              disabled={!isLoading && !input.trim()}
-	              aria-label={isLoading ? t("agent_chat_stop") : t("agent_chat_send")}
-	            >
-	              {isLoading ? (
-	                <span className="agent-stop-icon" aria-hidden="true" />
-	              ) : (
-	                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-	                  <line x1="22" y1="2" x2="11" y2="13" />
-	                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
-	                </svg>
-	              )}
-	            </button>
+            <div
+              ref={composerRef}
+              className={`agent-input-shell${isWorkMenuOpen || isUploadMenuOpen || isChapterMenuOpen ? " agent-input-shell--menu-open" : ""}`}
+            >
+              {!!attachments.length && (
+                <div className="agent-attachment-list">
+                  {attachments.map((file) => (
+                    <span key={file.id} className="agent-attachment-chip" title={file.name}>
+                      {file.kind === "chapter" ? <FileTextOutlined /> : <PaperClipOutlined />}
+                      <span className="agent-attachment-chip__name">{file.name}</span>
+                      {file.kind === "file" && <span className="agent-attachment-chip__size">{formatFileSize(file.size)}</span>}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachment(file.id)}
+                        aria-label={t("agent_attachment_remove").replace("{name}", file.name)}
+                      >
+                        <CloseOutlined />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <textarea
+                ref={inputRef}
+                className="agent-input"
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onKeyUp={handleInputKeyUp}
+                placeholder={activeNovelId ? t("agent_chat_placeholder") : t("agent_select_novel_first")}
+                disabled={isLoading || !activeNovelId}
+              />
+              <div className="agent-input-toolbar">
+                <div className="agent-context-tools">
+                  <button
+                    type="button"
+                    className={`agent-upload-btn${isUploadMenuOpen ? " agent-upload-btn--active" : ""}`}
+                    onClick={handleToggleUploadMenu}
+                    disabled={isLoading}
+                    title={t("agent_add_context_or_file")}
+                    aria-label={t("agent_add_context_or_file")}
+                    aria-expanded={isUploadMenuOpen}
+                  >
+                    <PlusOutlined />
+                  </button>
+                  <div className="agent-work-menu-wrap">
+                    <button
+                      type="button"
+                      className={`agent-work-selector${!activeNovelId ? " agent-work-selector--empty" : ""}${isWorkMenuOpen ? " agent-work-selector--open" : ""}`}
+                      onClick={handleToggleWorkMenu}
+                      disabled={isLoading || novels.length === 0}
+                      title={activeNovelTitle}
+                      aria-label={t("agent_select_work")}
+                      aria-expanded={isWorkMenuOpen}
+                    >
+                      <BookOutlined />
+                      <span className="agent-work-selector__text">{activeNovelTitle}</span>
+                      <DownOutlined className="agent-work-selector__chevron" />
+                    </button>
+                    {isWorkMenuOpen && (
+                      <div className="agent-work-menu" role="menu" aria-label={t("agent_select_work")}>
+                        <div className="agent-work-menu__label">{t("agent_select_work")}</div>
+                        {novels.map((novel) => {
+                          const isSelected = novel.id === activeNovelId;
+                          return (
+                            <button
+                              key={novel.id}
+                              type="button"
+                              className={`agent-work-menu__item${isSelected ? " agent-work-menu__item--selected" : ""}`}
+                              onClick={() => handleNovelSelect(novel.id)}
+                              role="menuitemradio"
+                              aria-checked={isSelected}
+                            >
+                              <span className="agent-work-menu__icon"><BookOutlined /></span>
+                              <span className="agent-work-menu__title">{novel.title || t("common_untitled")}</span>
+                              {isSelected && <CheckOutlined className="agent-work-menu__check" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {editorSelection?.text.trim() && (
+                    <div className="agent-selection-context">
+                      <FileTextOutlined />
+                      <span>{t("agent_selection_lines").replace("{count}", String(editorSelection.lineCount || 1))}</span>
+                      <button type="button" onClick={() => setEditorSelection(null)} aria-label={t("agent_selection_clear")}>
+                        <CloseOutlined />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <input
+                  ref={fileInputRef}
+                  className="agent-file-input"
+                  type="file"
+                  multiple
+                  onChange={handleUploadFiles}
+                />
+                {isUploadMenuOpen && (
+                  <div className="agent-upload-menu" role="menu" aria-label={t("agent_upload_file")}>
+                    <button type="button" className="agent-upload-menu__item" onClick={handleOpenFilePicker} role="menuitem">
+                      <UploadOutlined />
+                      <span>{t("agent_upload_from_computer")}</span>
+                    </button>
+                    <button type="button" className="agent-upload-menu__item" onClick={handleOpenChapterMenu} role="menuitem">
+                      <FileTextOutlined />
+                      <span>{t("agent_add_context")}</span>
+                    </button>
+                  </div>
+                )}
+                {isChapterMenuOpen && (
+                  <div className="agent-chapter-menu" role="menu" aria-label={t("agent_add_context")}>
+                    <div className="agent-work-menu__label">{t("agent_context_chapters")}</div>
+                    {chapters.length === 0 ? (
+                      <div className="agent-context-empty">{t("agent_context_no_chapters")}</div>
+                    ) : chapters.map((chapter, index) => {
+                      const title = `${t("write_chapter_n")}${index + 1}${t("write_chapter_n_suffix")}${chapter.title?.trim() ? ` ${chapter.title.trim()}` : ""}`;
+                      const selected = attachments.some((item) => item.kind === "chapter" && item.chapterId === chapter.id);
+                      return (
+                        <button
+                          key={chapter.id}
+                          type="button"
+                          className={`agent-work-menu__item${selected ? " agent-work-menu__item--selected" : ""}`}
+                          onClick={() => handleAddChapterContext(chapter, index)}
+                          role="menuitemcheckbox"
+                          aria-checked={selected}
+                        >
+                          <span className="agent-work-menu__icon"><FileTextOutlined /></span>
+                          <span className="agent-work-menu__title">{title}</span>
+                          {selected && <CheckOutlined className="agent-work-menu__check" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+	              <button
+	                className={`agent-send-btn${isLoading ? " agent-send-btn--stop" : ""}`}
+	                onClick={isLoading ? handleInterrupt : handleSend}
+	                disabled={!isLoading && (!activeNovelId || (!input.trim() && attachments.length === 0 && !editorSelection?.text.trim()))}
+	                aria-label={isLoading ? t("agent_chat_stop") : t("agent_chat_send")}
+	              >
+	                {isLoading ? (
+	                  <span className="agent-stop-icon" aria-hidden="true" />
+	                ) : (
+                    <span className="agent-send-btn__arrow" aria-hidden="true">↑</span>
+	                )}
+	              </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

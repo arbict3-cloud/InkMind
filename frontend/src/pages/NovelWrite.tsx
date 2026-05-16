@@ -151,6 +151,7 @@ export default function NovelWrite() {
     height: number;
   } | null>(null);
   const selectionRangeRef = useRef<{ start: number; end: number } | null>(null);
+  const preserveSelectionForAssistantRef = useRef(false);
   selectionRangeRef.current = selectionRange;
   const [err, setErr] = useState("");
 
@@ -339,6 +340,22 @@ export default function NovelWrite() {
       window.removeEventListener("pointercancel", handleUp);
     };
   }, [selectionPanelDragging]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      const shouldPreserve = Boolean(target?.closest(".ai-assistant-panel, .ai-assistant-float-btn"));
+      preserveSelectionForAssistantRef.current = shouldPreserve;
+      if (shouldPreserve && selectionRangeRef.current) {
+        const preserved = selectionRangeRef.current;
+        window.setTimeout(() => {
+          bodyTextareaRef.current?.setSelectionRange(preserved.start, preserved.end);
+        }, 0);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    return () => window.removeEventListener("pointerdown", handlePointerDown, true);
+  }, []);
 
   useEffect(() => {
     if (!evaluatePanelDragging) return;
@@ -611,8 +628,53 @@ export default function NovelWrite() {
     return { start: s, end: e };
   }
 
+  function estimateSelectedLineCount(text: string): number {
+    const ta = bodyTextareaRef.current;
+    if (!ta || !text) return 0;
+    const style = getComputedStyle(ta);
+    const horizontalPadding = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    const fontSize = parseFloat(style.fontSize) || 16;
+    const usableWidth = Math.max(160, ta.clientWidth - horizontalPadding);
+    const charWidth = fontSize * 0.56;
+    const charsPerLine = Math.max(18, Math.floor(usableWidth / charWidth));
+
+    return text.split(/\r?\n/).reduce((total, line) => {
+      const weightedLength = Array.from(line).reduce((sum, char) => (
+        sum + (/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(char) ? 1.7 : 1)
+      ), 0);
+      return total + Math.max(1, Math.ceil(weightedLength / charsPerLine));
+    }, 0);
+  }
+
   function syncSelectionFromTextarea() {
-    setSelectionRange(captureSelection());
+    const range = captureSelection();
+    if (!range && preserveSelectionForAssistantRef.current && selectionRangeRef.current) {
+      const preserved = selectionRangeRef.current;
+      setSelectionRange(preserved);
+      window.setTimeout(() => {
+        bodyTextareaRef.current?.setSelectionRange(preserved.start, preserved.end);
+      }, 0);
+      return;
+    }
+    setSelectionRange(range);
+    if (!range || activeId === null) {
+      window.dispatchEvent(new CustomEvent("inkmind:editor-selection", {
+        detail: { novelId: id, chapterId: activeId, text: "", lineCount: 0 },
+      }));
+      return;
+    }
+    const selectedText = content.slice(range.start, range.end);
+    window.dispatchEvent(new CustomEvent("inkmind:editor-selection", {
+      detail: {
+        novelId: id,
+        chapterId: activeId,
+        chapterTitle: title,
+        text: selectedText,
+        lineCount: Math.max(1, estimateSelectedLineCount(selectedText)),
+        start: range.start,
+        end: range.end,
+      },
+    }));
   }
 
   function getSelectionResultAnchor(range: { start: number; end: number }): { left: number; top: number } | null {

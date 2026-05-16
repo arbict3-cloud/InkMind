@@ -311,6 +311,103 @@ body.ai-assistant-is-dragging {
   50% { opacity: 1; transform: scale(1.1); }
 }
 
+.ai-assistant-header__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ai-assistant-icon-btn,
+.ai-assistant-header__close {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #6c6a64);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.ai-assistant-icon-btn:hover:not(:disabled),
+.ai-assistant-header__close:hover {
+  background: color-mix(in oklab, var(--ink, #141413) 6%, transparent);
+  color: var(--ink, #141413);
+}
+
+.ai-assistant-icon-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.ai-assistant-icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.ai-assistant-icon-btn--tooltip {
+  position: relative;
+}
+
+.ai-assistant-icon-btn--tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  width: max-content;
+  max-width: 180px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #202124;
+  color: #fff;
+  font: 600 0.74rem/1.2 var(--font-ui);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+.ai-assistant-icon-btn--tooltip:hover::after,
+.ai-assistant-icon-btn--tooltip:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ai-assistant-icon-stack {
+  position: relative;
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-assistant-icon-stack .anticon-comment {
+  font-size: 17px;
+}
+
+.ai-assistant-icon-stack .anticon-plus {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--canvas, #faf9f5);
+  color: var(--accent-active, #a9583e);
+  font-size: 8px;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--border, #e6dfd8) 80%, transparent);
+}
+
 .agent-steps-container {
   padding: 4px 12px;
   border-bottom: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 70%, transparent);
@@ -444,6 +541,72 @@ body.ai-assistant-is-dragging {
   word-break: break-word;
   font-family: var(--font-ui);
   border: 1px solid color-mix(in oklab, var(--accent, #cc785c) 16%, transparent);
+}
+
+.agent-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.agent-message-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 180px;
+  min-height: 24px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--canvas, #faf9f5) 72%, transparent);
+  color: var(--muted, #6c6a64);
+  font-size: 0.74rem;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-message-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 9px;
+  padding: 8px 9px;
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--canvas, #faf9f5) 66%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent, #cc785c) 14%, transparent);
+}
+
+.agent-message-selection__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: color-mix(in oklab, var(--ink, #141413) 76%, var(--muted, #6c6a64));
+  font: 750 0.78rem/1.2 var(--font-ui);
+}
+
+.agent-message-selection__label > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-message-selection__count {
+  margin-left: 7px;
+  color: var(--muted, #6c6a64);
+  font-weight: 650;
+}
+
+.agent-message-selection__text {
+  max-height: 4.8em;
+  overflow: hidden;
+  color: color-mix(in oklab, var(--ink, #141413) 82%, var(--muted, #6c6a64));
+  font: 500 0.8rem/1.6 var(--font-ui);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .agent-message-assistant {
@@ -917,36 +1080,346 @@ body.ai-assistant-is-dragging {
 }
 
 .agent-input-container {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 10px 12px 12px 14px;
+  padding: 10px 12px 12px;
   border-top: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 74%, transparent);
   background: color-mix(in oklab, var(--canvas, #faf9f5) 92%, #fff);
   flex-shrink: 0;
 }
 
+.agent-input-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 92%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--canvas, #faf9f5) 90%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, #fff 38%, transparent);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.agent-input-shell:focus-within,
+.agent-input-shell--menu-open {
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 46%, var(--border, #e6dfd8));
+  box-shadow:
+    0 0 0 2px color-mix(in oklab, var(--accent, #cc785c) 10%, transparent),
+    inset 0 0 0 1px color-mix(in oklab, #fff 42%, transparent);
+}
+
 .agent-input {
-  flex: 1;
+  width: 100%;
   resize: none;
-  border: 1px solid var(--border, #e6dfd8);
-  border-radius: 10px;
-  padding: 9px 14px;
-  font-size: 0.88rem;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 8px 2px;
+  font-size: 0.9rem;
   font-family: var(--font-ui);
   line-height: 1.5;
   color: var(--ink, #141413);
-  background: color-mix(in oklab, var(--card, #efe9de) 14%, var(--canvas, #faf9f5));
+  background: transparent;
   outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
-  height: 40px;
+  height: 38px;
   max-height: 120px;
   overflow-y: auto;
 }
 
-.agent-input:focus {
-  border-color: var(--accent, #cc785c);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #cc785c) 10%, transparent);
+.agent-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.agent-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 4px 5px 4px 9px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--accent, #cc785c) 18%, var(--border, #e6dfd8));
+  background: color-mix(in oklab, var(--accent, #cc785c) 7%, var(--canvas, #faf9f5));
+  color: var(--ink, #141413);
+  font: 600 0.76rem/1 var(--font-ui);
+}
+
+.agent-attachment-chip__name {
+  max-width: 180px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-attachment-chip__size {
+  color: var(--muted, #6c6a64);
+  font-weight: 500;
+}
+
+.agent-attachment-chip button {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, #6c6a64);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-attachment-chip button:hover {
+  background: color-mix(in oklab, var(--ink, #141413) 8%, transparent);
+  color: var(--ink, #141413);
+}
+
+.agent-selection-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 190px;
+  height: 32px;
+  padding-left: 10px;
+  color: var(--muted, #6c6a64);
+  font: 700 0.82rem/1 var(--font-ui);
+}
+
+.agent-selection-context::before {
+  content: "";
+  width: 1px;
+  height: 20px;
+  margin-right: 4px;
+  background: color-mix(in oklab, var(--border, #e6dfd8) 88%, transparent);
+}
+
+.agent-selection-context > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-selection-context button {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, #6c6a64);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-selection-context button:hover {
+  background: color-mix(in oklab, var(--ink, #141413) 8%, transparent);
+  color: var(--ink, #141413);
+}
+
+.agent-input-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-context-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-work-menu-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.agent-work-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 190px;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 88%, transparent);
+  background: color-mix(in oklab, var(--card, #efe9de) 20%, transparent);
+  color: var(--ink, #141413);
+  cursor: pointer;
+  font: 700 0.8rem/1 var(--font-ui);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.agent-work-selector:hover:not(:disabled),
+.agent-work-selector--open {
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 28%, var(--border, #e6dfd8));
+  background: color-mix(in oklab, var(--accent, #cc785c) 8%, var(--canvas, #faf9f5));
+}
+
+.agent-work-selector--empty {
+  color: var(--muted, #6c6a64);
+}
+
+.agent-work-selector:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.agent-work-selector__text {
+  min-width: 0;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-work-selector__chevron {
+  color: var(--muted, #6c6a64);
+  font-size: 0.72rem;
+  pointer-events: none;
+}
+
+.agent-work-menu,
+.agent-upload-menu,
+.agent-chapter-menu {
+  position: absolute;
+  bottom: 42px;
+  z-index: 30;
+  min-width: 220px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 92%, transparent);
+  background: color-mix(in oklab, var(--canvas, #faf9f5) 94%, #fff);
+  box-shadow: 0 18px 46px rgba(20, 20, 19, 0.18);
+  animation: ai-menu-pop 0.12s ease-out;
+}
+
+.agent-work-menu {
+  left: 0;
+  width: min(270px, calc(100vw - 44px));
+}
+
+.agent-upload-menu {
+  left: 0;
+  width: 236px;
+}
+
+.agent-chapter-menu {
+  left: 0;
+  width: min(320px, calc(100vw - 44px));
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+@keyframes ai-menu-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.agent-work-menu__label {
+  padding: 5px 8px 7px;
+  color: var(--muted, #6c6a64);
+  font: 700 0.72rem/1 var(--font-ui);
+}
+
+.agent-work-menu__item,
+.agent-upload-menu__item {
+  width: 100%;
+  min-height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink, #141413);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  text-align: left;
+  font: 650 0.82rem/1.25 var(--font-ui);
+}
+
+.agent-work-menu__item:hover,
+.agent-upload-menu__item:hover {
+  background: color-mix(in oklab, var(--accent, #cc785c) 9%, var(--canvas, #faf9f5));
+}
+
+.agent-work-menu__item--selected {
+  color: var(--accent-active, #a9583e);
+  background: color-mix(in oklab, var(--accent, #cc785c) 11%, var(--canvas, #faf9f5));
+}
+
+.agent-work-menu__icon {
+  color: var(--muted, #6c6a64);
+}
+
+.agent-work-menu__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-work-menu__check {
+  color: var(--accent-active, #a9583e);
+  font-size: 0.82rem;
+}
+
+.agent-context-empty {
+  padding: 10px 9px;
+  color: var(--muted, #6c6a64);
+  font: 600 0.8rem/1.4 var(--font-ui);
+}
+
+.agent-upload-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 88%, transparent);
+  background: color-mix(in oklab, var(--card, #efe9de) 20%, transparent);
+  color: var(--muted, #6c6a64);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.agent-upload-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  color: var(--accent-active, #a9583e);
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 28%, var(--border, #e6dfd8));
+  background: color-mix(in oklab, var(--accent, #cc785c) 8%, var(--canvas, #faf9f5));
+}
+
+.agent-upload-btn--active {
+  color: var(--accent-active, #a9583e);
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 30%, var(--border, #e6dfd8));
+  background: color-mix(in oklab, var(--accent, #cc785c) 10%, var(--canvas, #faf9f5));
+}
+
+.agent-upload-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.agent-file-input {
+  display: none;
 }
 
 .agent-input:disabled {
@@ -958,9 +1431,9 @@ body.ai-assistant-is-dragging {
 }
 
 .agent-send-btn {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   border: none;
   background: var(--accent, #cc785c);
   color: #fff;
@@ -970,6 +1443,12 @@ body.ai-assistant-is-dragging {
   justify-content: center;
   transition: transform 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
   flex-shrink: 0;
+}
+
+.agent-send-btn__arrow {
+  font-size: 1.5rem;
+  line-height: 1;
+  transform: translateY(-1px);
 }
 
 .agent-send-btn:hover:not(:disabled) {
@@ -1064,14 +1543,20 @@ body.ai-assistant-is-dragging {
   color: var(--ink, #faf9f5);
 }
 
+[data-theme="dark"] .ai-assistant-icon-btn,
 [data-theme="dark"] .ai-assistant-header__close,
+.theme--dark .ai-assistant-icon-btn,
 .theme--dark .ai-assistant-header__close,
+.write-theme--dark .ai-assistant-icon-btn,
 .write-theme--dark .ai-assistant-header__close {
   color: var(--muted, #a09d96);
 }
 
+[data-theme="dark"] .ai-assistant-icon-btn:hover:not(:disabled),
 [data-theme="dark"] .ai-assistant-header__close:hover,
+.theme--dark .ai-assistant-icon-btn:hover:not(:disabled),
 .theme--dark .ai-assistant-header__close:hover,
+.write-theme--dark .ai-assistant-icon-btn:hover:not(:disabled),
 .write-theme--dark .ai-assistant-header__close:hover {
   background: color-mix(in oklab, var(--ink, #faf9f5) 8%, transparent);
   color: var(--ink, #faf9f5);
@@ -1125,11 +1610,114 @@ body.ai-assistant-is-dragging {
   border-top-color: var(--border, #2a2926);
 }
 
+[data-theme="dark"] .agent-input-shell,
+.theme--dark .agent-input-shell,
+.write-theme--dark .agent-input-shell {
+  background: color-mix(in oklab, var(--card, #2a2520) 82%, var(--bg-deep, #252320));
+  border-color: var(--border, #3a3530);
+  box-shadow: none;
+}
+
+[data-theme="dark"] .agent-input-shell:focus-within,
+[data-theme="dark"] .agent-input-shell--menu-open,
+.theme--dark .agent-input-shell:focus-within,
+.theme--dark .agent-input-shell--menu-open,
+.write-theme--dark .agent-input-shell:focus-within,
+.write-theme--dark .agent-input-shell--menu-open {
+  border-color: color-mix(in oklab, var(--accent, #cc785c) 54%, var(--border, #3a3530));
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent, #cc785c) 18%, transparent);
+}
+
 [data-theme="dark"] .agent-input,
 .theme--dark .agent-input,
 .write-theme--dark .agent-input {
+  background: transparent;
+  color: var(--ink, #faf9f5);
+}
+
+[data-theme="dark"] .agent-work-selector,
+.theme--dark .agent-work-selector,
+.write-theme--dark .agent-work-selector,
+[data-theme="dark"] .agent-upload-btn,
+.theme--dark .agent-upload-btn,
+.write-theme--dark .agent-upload-btn,
+[data-theme="dark"] .agent-attachment-chip,
+.theme--dark .agent-attachment-chip,
+.write-theme--dark .agent-attachment-chip {
   background: color-mix(in oklab, var(--ink, #faf9f5) 5%, var(--card, #2a2520));
   border-color: var(--border, #3a3530);
+  color: var(--ink, #faf9f5);
+}
+
+[data-theme="dark"] .agent-selection-context,
+.theme--dark .agent-selection-context,
+.write-theme--dark .agent-selection-context {
+  color: var(--muted, #a09d96);
+}
+
+[data-theme="dark"] .agent-work-menu,
+[data-theme="dark"] .agent-upload-menu,
+[data-theme="dark"] .agent-chapter-menu,
+.theme--dark .agent-work-menu,
+.theme--dark .agent-upload-menu,
+.theme--dark .agent-chapter-menu,
+.write-theme--dark .agent-work-menu,
+.write-theme--dark .agent-upload-menu,
+.write-theme--dark .agent-chapter-menu {
+  background: color-mix(in oklab, var(--card, #2a2520) 92%, var(--bg-deep, #252320));
+  border-color: var(--border, #3a3530);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+}
+
+[data-theme="dark"] .agent-work-menu__item,
+[data-theme="dark"] .agent-upload-menu__item,
+.theme--dark .agent-work-menu__item,
+.theme--dark .agent-upload-menu__item,
+.write-theme--dark .agent-work-menu__item,
+.write-theme--dark .agent-upload-menu__item {
+  color: var(--ink, #faf9f5);
+}
+
+[data-theme="dark"] .agent-work-menu__item:hover,
+[data-theme="dark"] .agent-upload-menu__item:hover,
+.theme--dark .agent-work-menu__item:hover,
+.theme--dark .agent-upload-menu__item:hover,
+.write-theme--dark .agent-work-menu__item:hover,
+.write-theme--dark .agent-upload-menu__item:hover,
+[data-theme="dark"] .agent-work-menu__item--selected,
+.theme--dark .agent-work-menu__item--selected,
+.write-theme--dark .agent-work-menu__item--selected {
+  background: color-mix(in oklab, var(--accent, #cc785c) 16%, var(--card, #2a2520));
+  color: color-mix(in oklab, var(--accent, #cc785c) 78%, #fff);
+}
+
+[data-theme="dark"] .ai-assistant-icon-stack .anticon-plus,
+.theme--dark .ai-assistant-icon-stack .anticon-plus,
+.write-theme--dark .ai-assistant-icon-stack .anticon-plus {
+  background: var(--bg-deep, #252320);
+  box-shadow: 0 0 0 1px var(--border, #3a3530);
+}
+
+[data-theme="dark"] .agent-message-attachment,
+.theme--dark .agent-message-attachment,
+.write-theme--dark .agent-message-attachment {
+  background: color-mix(in oklab, var(--ink, #faf9f5) 7%, transparent);
+  color: var(--muted, #a09d96);
+}
+
+[data-theme="dark"] .agent-message-selection,
+.theme--dark .agent-message-selection,
+.write-theme--dark .agent-message-selection {
+  background: color-mix(in oklab, var(--ink, #faf9f5) 6%, transparent);
+  border-color: color-mix(in oklab, var(--ink, #faf9f5) 9%, transparent);
+}
+
+[data-theme="dark"] .agent-message-selection__label,
+.theme--dark .agent-message-selection__label,
+.write-theme--dark .agent-message-selection__label,
+[data-theme="dark"] .agent-message-selection__text,
+.theme--dark .agent-message-selection__text,
+.write-theme--dark .agent-message-selection__text {
   color: var(--ink, #faf9f5);
 }
 
@@ -1137,27 +1725,6 @@ body.ai-assistant-is-dragging {
 .theme--dark .agent-question-container,
 .write-theme--dark .agent-question-container {
   background: color-mix(in oklab, var(--card, #2a2520) 60%, var(--bg-deep, #252320));
-}
-
-.ai-assistant-header__close {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: var(--muted, #6c6a64);
-  cursor: pointer;
-  font-size: 1.2rem;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.ai-assistant-header__close:hover {
-  background: color-mix(in oklab, var(--ink, #141413) 6%, transparent);
-  color: var(--ink, #141413);
 }
 
 .ai-assistant-messages {
