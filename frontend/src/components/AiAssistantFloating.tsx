@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState, useRef } from "react";
 import {
   BookOutlined,
   CheckOutlined,
@@ -423,6 +423,30 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const activeNovelId = selectedNovelId ?? novelId;
   const activeNovel = novels.find((item) => item.id === activeNovelId);
   const activeNovelTitle = activeNovel?.title || (activeNovelId ? t("common_untitled") : t("agent_select_work"));
+
+  const resizeInputTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
+    const textarea = target ?? inputRef.current;
+    if (!textarea) return;
+    const maxHeight = Math.min(260, Math.max(118, Math.floor(window.innerHeight * 0.36)));
+    textarea.style.height = "auto";
+    textarea.style.overflowY = "hidden";
+    const nextHeight = Math.min(maxHeight, Math.max(32, textarea.scrollHeight));
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+    if (textarea.scrollHeight <= maxHeight) textarea.scrollTop = 0;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    resizeInputTextarea();
+  }, [input, isOpen, panelRect.width, resizeInputTextarea]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleWindowResize = () => resizeInputTextarea();
+    window.addEventListener("resize", handleWindowResize);
+    return () => window.removeEventListener("resize", handleWindowResize);
+  }, [isOpen, resizeInputTextarea]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1183,13 +1207,14 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const handleInputChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value;
     setInput(value);
+    resizeInputTextarea(event.target);
     const cursor = event.target.selectionStart;
     if (shouldOpenChapterMenuFromInput(value, cursor)) {
       setIsUploadMenuOpen(false);
       setIsWorkMenuOpen(false);
       setIsChapterMenuOpen(true);
     }
-  }, [shouldOpenChapterMenuFromInput]);
+  }, [resizeInputTextarea, shouldOpenChapterMenuFromInput]);
 
   const handleInputKeyUp = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const value = event.currentTarget.value;

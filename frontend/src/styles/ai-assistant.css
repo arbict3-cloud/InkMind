@@ -1112,16 +1112,19 @@ body.ai-assistant-is-dragging {
   resize: none;
   border: none;
   border-radius: 8px;
-  padding: 6px 8px 2px;
+  padding: 4px 8px;
   font-size: 0.9rem;
   font-family: var(--font-ui);
   line-height: 1.5;
   color: var(--ink, #141413);
   background: transparent;
   outline: none;
-  height: 38px;
-  max-height: 120px;
-  overflow-y: auto;
+  height: 32px;
+  min-height: 32px;
+  max-height: min(260px, 36vh);
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+  transition: height 0.12s ease;
 }
 
 .agent-attachment-list {
