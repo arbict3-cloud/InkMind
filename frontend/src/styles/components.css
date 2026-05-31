@@ -130,6 +130,26 @@
   border-color: var(--border-hover);
 }
 
+@media (max-width: 700px), (pointer: coarse) {
+  .btn,
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="radio"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="menuitemcheckbox"] {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  .btn {
+    height: auto;
+    padding-top: 0.72rem;
+    padding-bottom: 0.72rem;
+  }
+}
+
 .btn-ghost:active:not(:disabled) {
   background: var(--bg-active);
 }

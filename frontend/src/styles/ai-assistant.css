@@ -272,6 +272,7 @@ body.ai-assistant-is-dragging {
 }
 
 .ai-assistant-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -416,6 +417,50 @@ body.ai-assistant-is-dragging {
   flex-shrink: 0;
   background: color-mix(in oklab, var(--card, #efe9de) 18%, transparent);
   overscroll-behavior: contain;
+}
+
+.agent-running-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in oklab, var(--border, #e6dfd8) 72%, transparent);
+  background: color-mix(in oklab, var(--accent, #cc785c) 7%, var(--canvas, #faf9f5));
+  flex-shrink: 0;
+}
+
+.agent-running-bar .agent-activity {
+  min-width: 0;
+  flex: 1;
+  background: transparent;
+  border-color: transparent;
+  padding-left: 0;
+}
+
+.agent-running-bar__stop {
+  min-width: 96px;
+  min-height: 36px;
+  border: 1px solid color-mix(in oklab, #b94a3a 30%, transparent);
+  border-radius: 9px;
+  background: color-mix(in oklab, #b94a3a 92%, var(--accent, #cc785c));
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font: 750 0.82rem/1 var(--font-ui);
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.agent-running-bar__stop:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.agent-running-bar__stop:active {
+  transform: translateY(0);
 }
 
 .agent-messages {
@@ -913,6 +958,35 @@ body.ai-assistant-is-dragging {
   padding: 10px 14px;
   font-size: 0.85rem;
   line-height: 1.5;
+}
+
+.agent-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.agent-error-action {
+  min-height: 34px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--error-soft, #b91c1c) 22%, transparent);
+  background: color-mix(in oklab, var(--canvas, #faf9f5) 84%, #fff);
+  color: var(--ink, #141413);
+  cursor: pointer;
+  padding: 0 11px;
+  font: 700 0.78rem/1 var(--font-ui);
+}
+
+.agent-error-action--primary {
+  border-color: color-mix(in oklab, var(--error-soft, #b91c1c) 36%, transparent);
+  background: color-mix(in oklab, var(--error-soft, #b91c1c) 10%, var(--canvas, #faf9f5));
+  color: var(--error-soft, #b91c1c);
+}
+
+.agent-error-action:hover {
+  border-color: color-mix(in oklab, var(--error-soft, #b91c1c) 42%, transparent);
+  background: color-mix(in oklab, var(--error-soft, #b91c1c) 9%, var(--canvas, #faf9f5));
 }
 
 .agent-message-content--saved {
@@ -1728,6 +1802,207 @@ body.ai-assistant-is-dragging {
 .theme--dark .agent-question-container,
 .write-theme--dark .agent-question-container {
   background: color-mix(in oklab, var(--card, #2a2520) 60%, var(--bg-deep, #252320));
+}
+
+[data-theme="dark"] .agent-running-bar,
+.theme--dark .agent-running-bar,
+.write-theme--dark .agent-running-bar {
+  background: color-mix(in oklab, var(--accent, #cc785c) 12%, var(--bg-deep, #252320));
+  border-bottom-color: var(--border, #2a2926);
+}
+
+[data-theme="dark"] .agent-error-action,
+.theme--dark .agent-error-action,
+.write-theme--dark .agent-error-action {
+  background: color-mix(in oklab, var(--card, #2a2520) 80%, var(--bg-deep, #252320));
+  color: var(--ink, #faf9f5);
+}
+
+[data-theme="dark"] .agent-error-action--primary,
+.theme--dark .agent-error-action--primary,
+.write-theme--dark .agent-error-action--primary {
+  background: color-mix(in oklab, var(--error-soft, #a53838) 24%, var(--card, #2a2520));
+  color: #fecaca;
+}
+
+@media (max-width: 700px), (max-height: 520px) and (orientation: landscape) {
+  .ai-assistant-float-btn {
+    left: auto !important;
+    right: max(14px, env(safe-area-inset-right)) !important;
+    top: auto !important;
+    bottom: max(86px, calc(env(safe-area-inset-bottom) + 72px)) !important;
+    min-width: 48px;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border-radius: 14px;
+  }
+
+  .ai-assistant-float-btn__label {
+    display: none;
+  }
+
+  .ai-assistant-panel {
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: min(82dvh, 720px) !important;
+    min-width: 0;
+    min-height: 320px;
+    max-width: none;
+    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)));
+    border-radius: 18px 18px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    box-shadow: 0 -18px 46px rgba(20, 20, 19, 0.22);
+    animation: aiAssistantSheetIn 0.2s ease-out;
+  }
+
+  .ai-assistant-panel__width-handle,
+  .ai-assistant-panel__resize {
+    display: none;
+  }
+
+  .ai-assistant-header {
+    cursor: default;
+    padding: 12px 14px;
+  }
+
+  .ai-assistant-header::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 7px;
+    width: 42px;
+    height: 4px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--muted, #6c6a64) 36%, transparent);
+    transform: translateX(-50%);
+  }
+
+  .ai-assistant-header__title {
+    padding-top: 6px;
+  }
+
+  .ai-assistant-icon-btn,
+  .ai-assistant-header__close,
+  .agent-upload-btn,
+  .agent-send-btn,
+  .agent-attachment-chip button,
+  .agent-selection-context button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .agent-running-bar {
+    padding: 8px 12px;
+  }
+
+  .agent-running-bar__stop {
+    min-width: 106px;
+    min-height: 44px;
+  }
+
+  .agent-steps-container {
+    max-height: 18dvh;
+    overscroll-behavior: contain;
+  }
+
+  .agent-messages {
+    padding: 14px 0;
+    overscroll-behavior: contain;
+  }
+
+  .agent-message {
+    padding: 0 14px;
+  }
+
+  .agent-message-content--user {
+    max-width: 92%;
+  }
+
+  .agent-input-container {
+    padding: 10px 12px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .agent-input {
+    min-height: 42px;
+    font-size: 16px;
+  }
+
+  .agent-input-toolbar {
+    align-items: flex-end;
+  }
+
+  .agent-context-tools {
+    flex-wrap: wrap;
+  }
+
+  .agent-work-selector,
+  .agent-selection-context {
+    height: 44px;
+  }
+
+  .agent-work-menu,
+  .agent-upload-menu,
+  .agent-chapter-menu {
+    bottom: 54px;
+    max-width: calc(100vw - 28px);
+  }
+
+  .agent-work-menu__item,
+  .agent-upload-menu__item,
+  .agent-welcome__action,
+  .agent-task-section__meta button,
+  .agent-task-section__actions button,
+  .agent-error-action,
+  .agent-saved-card__actions button {
+    min-height: 44px;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .ai-assistant-panel {
+    height: calc(100dvh - 8px) !important;
+    max-height: calc(100dvh - 8px);
+  }
+
+  .agent-welcome {
+    padding: 18px 20px;
+  }
+
+  .agent-steps-container {
+    max-height: 96px;
+  }
+
+  .agent-task-section__content {
+    max-height: 220px;
+  }
+}
+
+@keyframes aiAssistantSheetIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-assistant-panel,
+  .ai-assistant-float-btn,
+  .agent-running-bar__stop,
+  .agent-send-btn,
+  .agent-welcome__action {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .ai-assistant-messages {

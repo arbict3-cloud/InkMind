@@ -3096,11 +3096,17 @@
 
 @media (max-width: 900px) {
   .write-shell {
-    padding: 14px 0 88px;
+    --write-frame-height: clamp(520px, calc(100dvh - 112px), 860px);
+    padding: 14px 0 max(88px, calc(env(safe-area-inset-bottom) + 72px));
   }
 
   .write-workspace {
     gap: 10px;
+  }
+
+  .write-sidenav-toggle {
+    position: relative;
+    z-index: 47;
   }
 
   .write-left-sidebar {
@@ -3150,12 +3156,40 @@
   }
 
   .write-ai-drawer {
-    left: 12px;
-    right: 12px;
+    left: 0 !important;
+    right: 0 !important;
     top: auto;
-    bottom: 84px;
-    width: auto;
-    max-height: min(70vh, 620px);
+    bottom: 0 !important;
+    width: 100vw !important;
+    max-height: min(78dvh, 640px);
+    border-radius: 18px 18px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    box-shadow: 0 -18px 44px rgba(20, 20, 19, 0.18);
+    z-index: 880;
+  }
+
+  .write-command-panel {
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    max-height: min(78dvh, 640px);
+  }
+
+  .write-command-panel .write-ai-drawer-head {
+    cursor: default;
+  }
+
+  .write-ai-drawer-head {
+    padding: 16px 18px 12px;
+  }
+
+  .write-ai-drawer-body {
+    overscroll-behavior: contain;
+    padding-bottom: max(18px, env(safe-area-inset-bottom));
   }
 
   .write-editor-header {
@@ -3193,6 +3227,90 @@
     right: 12px;
     width: auto;
     max-height: min(70vh, 560px);
+  }
+
+  .write-icon-btn,
+  .write-ai-quickbtn,
+  .write-history-btn,
+  .write-summary-toggle,
+  .write-summary-inspire-btn,
+  .write-generate-tab,
+  .write-generate-mode-btn,
+  .write-generate-submit,
+  .write-ai-close,
+  .write-selection-float__item,
+  .write-preview-actions .btn,
+  .write-ai-command-actions .btn {
+    min-height: 44px;
+  }
+
+  .write-icon-btn,
+  .write-summary-inspire-btn {
+    min-width: 44px;
+  }
+
+  .write-ai-quickbtn,
+  .write-history-btn {
+    height: 44px;
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+
+  .write-selection-float {
+    max-width: calc(100vw - 20px);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    transform: translate(-50%, calc(-100% - 8px));
+  }
+
+  .write-selection-float__label {
+    min-width: 36px;
+  }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .write-shell {
+    --write-frame-height: calc(100dvh - 72px);
+    padding-top: 8px;
+  }
+
+  .write-workspace {
+    height: var(--write-frame-height);
+  }
+
+  .write-editor-header {
+    padding-top: 12px;
+    padding-bottom: 10px;
+  }
+
+  .write-action-strip {
+    gap: 8px;
+  }
+
+  .write-ai-drawer,
+  .write-command-panel {
+    max-height: calc(100dvh - 10px);
+  }
+
+  .write-ai-drawer-head {
+    padding-top: 12px;
+    padding-bottom: 10px;
+  }
+
+  .write-left-sidebar {
+    top: 58px;
+    bottom: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .write-icon-btn,
+  .write-ai-quickbtn,
+  .write-history-btn,
+  .write-ai-drawer,
+  .write-selection-float {
+    transition: none !important;
+    animation: none !important;
   }
 }
 
