@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState, useRef } from "react";
 import {
   BookOutlined,
   CheckOutlined,
@@ -60,6 +60,7 @@ interface AgentMessage {
   isStreaming?: boolean;
   savedChapter?: SseChapterSavedData;
   taskSections?: AgentTaskSection[];
+  actionButtons?: ActionButton[];
 }
 
 interface AgentTaskSection {
@@ -72,6 +73,12 @@ interface AgentTaskSection {
   editing?: boolean;
   saving?: boolean;
   saved?: boolean;
+}
+
+interface ActionButton {
+  label: string;
+  type: "primary" | "default" | "danger";
+  action: () => void;
 }
 
 export interface AiAssistantFloatingProps {
@@ -403,6 +410,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const activeAbortRef = useRef<AbortController | null>(null);
   const activeCloseRef = useRef<(() => void) | null>(null);
   const answeringQuestionRef = useRef(false);
+  const lastAgentPromptRef = useRef("");
   const resizeRef = useRef<{
     startX: number;
     startY: number;
@@ -423,6 +431,30 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const activeNovelId = selectedNovelId ?? novelId;
   const activeNovel = novels.find((item) => item.id === activeNovelId);
   const activeNovelTitle = activeNovel?.title || (activeNovelId ? t("common_untitled") : t("agent_select_work"));
+
+  const resizeInputTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
+    const textarea = target ?? inputRef.current;
+    if (!textarea) return;
+    const maxHeight = Math.min(260, Math.max(118, Math.floor(window.innerHeight * 0.36)));
+    textarea.style.height = "auto";
+    textarea.style.overflowY = "hidden";
+    const nextHeight = Math.min(maxHeight, Math.max(32, textarea.scrollHeight));
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+    if (textarea.scrollHeight <= maxHeight) textarea.scrollTop = 0;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    resizeInputTextarea();
+  }, [input, isOpen, panelRect.width, resizeInputTextarea]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleWindowResize = () => resizeInputTextarea();
+    window.addEventListener("resize", handleWindowResize);
+    return () => window.removeEventListener("resize", handleWindowResize);
+  }, [isOpen, resizeInputTextarea]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -686,6 +718,57 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
     try { localStorage.removeItem(`${SESSION_KEY}_${activeNovelId}`); } catch { /* ignore */ }
   }, [activeNovelId]);
 
+  const focusComposer = useCallback(() => {
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  const applyRecoveryPrompt = useCallback((mode: "retry" | "short" | "background") => {
+    const lastPrompt = lastAgentPromptRef.current.trim();
+    if (mode === "retry") {
+      setInput(lastPrompt);
+    } else if (mode === "short") {
+      setInput(
+        t("agent_recovery_short_prompt").replace("{prompt}", lastPrompt || t("agent_recovery_last_task")),
+      );
+    } else {
+      setInput(
+        t("agent_recovery_background_prompt").replace("{prompt}", lastPrompt || t("agent_recovery_last_task")),
+      );
+    }
+    focusComposer();
+  }, [focusComposer, t]);
+
+  const recoveryActions = useCallback((): ActionButton[] => ([
+    {
+      label: t("agent_recovery_retry"),
+      type: "primary",
+      action: () => applyRecoveryPrompt("retry"),
+    },
+    {
+      label: t("agent_recovery_shorter"),
+      type: "default",
+      action: () => applyRecoveryPrompt("short"),
+    },
+    {
+      label: t("agent_recovery_background"),
+      type: "default",
+      action: () => applyRecoveryPrompt("background"),
+    },
+  ]), [applyRecoveryPrompt, t]);
+
+  const addRecoverableErrorMessage = useCallback((content: string) => {
+    setMessages((prev) => [
+      ...stopStreamingMessages(prev),
+      {
+        id: generateId(),
+        role: "error",
+        content,
+        timestamp: Date.now(),
+        actionButtons: recoveryActions(),
+      },
+    ]);
+  }, [recoveryActions]);
+
   const buildChatHandlers = useCallback((aid: string, runId: number) => {
     activeAssistantIdRef.current = aid;
     const isStaleRun = () => activeRunIdRef.current !== runId;
@@ -808,16 +891,13 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       onError: (data: any) => {
         if (isStaleRun()) return;
         answeringQuestionRef.current = false;
-        setMessages((prev) => [
-          ...stopStreamingMessages(prev),
-          { id: generateId(), role: "error", content: data.message, timestamp: Date.now() },
-        ]);
+        addRecoverableErrorMessage(data.message || t("agent_task_failed"));
         setIsLoading(false);
         activeAbortRef.current = null;
         activeCloseRef.current = null;
       },
     };
-  }, []);
+  }, [addRecoverableErrorMessage, t]);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
@@ -829,6 +909,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
       messageAttachments,
     );
     const displayText = text || (messageSelection ? t("agent_selection_user_message") : t("agent_attachment_user_message"));
+    lastAgentPromptRef.current = messageForAgent;
 
     setInput("");
     setAttachments([]);
@@ -876,7 +957,7 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 	              activeCloseRef.current = retryConn.close;
 	            } catch {
                 if (activeRunIdRef.current !== runId) return;
-	              setMessages((prev) => [...prev, { id: generateId(), role: "error", content: "创建新会话失败", timestamp: Date.now() }]);
+	              addRecoverableErrorMessage(t("agent_session_recreate_failed"));
 	              setIsLoading(false);
             }
           } else {
@@ -895,10 +976,10 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 	      activeCloseRef.current = conn.close;
 	    } catch (err) {
       if (activeRunIdRef.current !== runId) return;
-      setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
+      addRecoverableErrorMessage(err instanceof Error ? err.message : t("agent_connection_failed"));
       setIsLoading(false);
     }
-  }, [input, attachments, editorSelection, isLoading, activeNovelId, ensureSession, resetSession, createNewSession, buildChatHandlers, t]);
+  }, [input, attachments, editorSelection, isLoading, activeNovelId, ensureSession, resetSession, createNewSession, buildChatHandlers, addRecoverableErrorMessage, t]);
 
   const handleInterrupt = useCallback(async () => {
     if (!isLoading || !activeNovelId || !session) return;
@@ -964,10 +1045,10 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
 	      }
     } catch (err) {
       if (activeRunIdRef.current !== runId) return;
-      setMessages((prev) => [...prev, { id: generateId(), role: "error", content: err instanceof Error ? err.message : "连接失败", timestamp: Date.now() }]);
+      addRecoverableErrorMessage(err instanceof Error ? err.message : t("agent_connection_failed"));
       setIsLoading(false);
     }
-  }, [session, pendingQuestion, activeNovelId, buildChatHandlers]);
+  }, [session, pendingQuestion, activeNovelId, buildChatHandlers, addRecoverableErrorMessage, t]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -1183,13 +1264,14 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
   const handleInputChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value;
     setInput(value);
+    resizeInputTextarea(event.target);
     const cursor = event.target.selectionStart;
     if (shouldOpenChapterMenuFromInput(value, cursor)) {
       setIsUploadMenuOpen(false);
       setIsWorkMenuOpen(false);
       setIsChapterMenuOpen(true);
     }
-  }, [shouldOpenChapterMenuFromInput]);
+  }, [resizeInputTextarea, shouldOpenChapterMenuFromInput]);
 
   const handleInputKeyUp = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const value = event.currentTarget.value;
@@ -1295,6 +1377,16 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
             </div>
           </div>
 
+          {isLoading && (
+            <div className="agent-running-bar" aria-live="polite">
+              <AgentActivityIndicator label={activityLabel} />
+              <button type="button" className="agent-running-bar__stop" onClick={handleInterrupt}>
+                <span className="agent-stop-icon" aria-hidden="true" />
+                <span>{t("agent_chat_stop")}</span>
+              </button>
+            </div>
+          )}
+
           {agentSteps.length > 0 && (
             <div className="agent-steps-container">
               <AgentStepDisplay steps={agentSteps} />
@@ -1370,7 +1462,23 @@ export default function AiAssistantFloating({ novelId }: AiAssistantFloatingProp
                     )}
                   </div>
                 ) : msg.role === "error" ? (
-                  <div className="agent-message-content agent-message-content--error">{msg.content}</div>
+                  <div className="agent-message-content agent-message-content--error">
+                    <div>{msg.content}</div>
+                    {!!msg.actionButtons?.length && (
+                      <div className="agent-error-actions">
+                        {msg.actionButtons.map((action) => (
+                          <button
+                            key={action.label}
+                            type="button"
+                            className={`agent-error-action agent-error-action--${action.type}`}
+                            onClick={action.action}
+                          >
+                            {action.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ) : msg.role === "chapter_saved" && msg.savedChapter ? (
                   <div className="agent-message-content agent-message-content--saved">
                     <div className="agent-saved-card">

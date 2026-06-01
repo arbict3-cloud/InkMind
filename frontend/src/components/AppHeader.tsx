@@ -152,7 +152,8 @@ export default function AppHeader({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        height,
+        minHeight: height,
+        height: "auto",
         transition: "background-color 0.3s ease, border-color 0.3s ease",
         ...headerStyle,
       }}
