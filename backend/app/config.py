@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     default_llm_provider: str = "qwen"
 
     LLM_PROVIDER_MODELS: dict[str, list[str]] = {
+        "gemini": [
+            "gemini-3.1-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+        ],
         "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro"],
         "qwen": ["qwen3-max", "qwen3.6-plus", "qwen3.6-max-preview", "qwen3.6-flash"],
         "kimi": ["kimi-k2.6", "kimi-k2.5", "moonshot-v1-32k", "moonshot-v1-128k"],
@@ -38,6 +43,10 @@ class Settings(BaseSettings):
     # 部分兼容网关/推理模型不接受 temperature，设为 False 可在请求中省略该参数
     openai_send_temperature: bool = True
     openai_timeout: float = 120.0
+
+    gemini_api_key: str | None = None
+    gemini_base_url: str | None = None
+    gemini_model: str = "gemini-3-flash-preview"
 
     # 通义千问（DashScope OpenAI 兼容：https://dashscope.aliyuncs.com/compatible-mode/v1）
     qwen_api_key: str | None = None

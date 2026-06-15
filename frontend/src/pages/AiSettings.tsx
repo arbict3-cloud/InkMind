@@ -31,6 +31,7 @@ const { Password } = Input;
 type AgentMode = "flexible" | "react" | "direct";
 
 const ALL_PROVIDERS = [
+  { value: "gemini", label: "Google Gemini", defaultUrl: "" },
   { value: "openai", label: "OpenAI", defaultUrl: "https://api.openai.com/v1" },
   { value: "qwen", label: "Qwen / 通义千问", defaultUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
   { value: "deepseek", label: "DeepSeek", defaultUrl: "https://api.deepseek.com" },

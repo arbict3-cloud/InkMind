@@ -3,11 +3,16 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.llm.base import LLMProvider
 from app.llm.anthropic_llm import AnthropicLLM
+from app.llm.gemini_llm import GeminiLLM
 from app.llm.metered_llm import LLMUsageAccumulator, MeteredLLM
 from app.llm.openai_llm import DeepSeekLLM, KimiLLM, MiniMaxLLM, OpenAILLM, OpenAICompatibleLLM, QwenLLM
 
 
 _PROVIDER_DEFAULTS: dict[str, dict] = {
+    "gemini": {
+        "base_url": None,
+        "model": "gemini-3-flash-preview",
+    },
     "openai": {
         "base_url": None,
         "model": "gpt-4o-mini",
@@ -51,6 +56,7 @@ _PROVIDER_DEFAULTS: dict[str, dict] = {
 }
 
 _PROVIDER_LABELS: dict[str, str] = {
+    "gemini": "Google Gemini",
     "openai": "OpenAI",
     "qwen": "Qwen / 通义千问",
     "deepseek": "DeepSeek",
@@ -63,6 +69,8 @@ _PROVIDER_LABELS: dict[str, str] = {
 
 def list_available_providers() -> list[str]:
     out: list[str] = []
+    if settings.gemini_api_key:
+        out.append("gemini")
     if settings.openai_api_key:
         out.append("openai")
     if settings.anthropic_api_key:
@@ -97,6 +105,10 @@ def get_builtin_provider_info() -> list[dict]:
 
 def get_llm(provider: str | None, model: str | None = None) -> LLMProvider:
     name = (provider or settings.default_llm_provider).lower().strip()
+    if name == "gemini":
+        if not settings.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY is not configured")
+        return GeminiLLM(model=model)
     if name == "openai":
         if not settings.openai_api_key:
             raise ValueError("未配置 OPENAI_API_KEY")
@@ -145,6 +157,8 @@ def get_llm_from_user_config(
         name = "kimi"
     if name == "anthropic":
         return AnthropicLLM(api_key=api_key, base_url=base_url, model=model)
+    if name == "gemini":
+        return GeminiLLM(api_key=api_key, base_url=base_url, model=model)
     defaults = _PROVIDER_DEFAULTS.get(name, _PROVIDER_DEFAULTS["openai"])
     effective_base_url = base_url or defaults.get("base_url")
     effective_model = model or defaults.get("model", "gpt-4o-mini")

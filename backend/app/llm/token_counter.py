@@ -27,7 +27,7 @@ def encoding_for_provider(provider: str) -> tiktoken.Encoding:
     - qwen：通义千问 OpenAI 兼容模式，用 cl100k_base（近似，官方推荐用 qwen tokenizer）
     - anthropic：Claude 系列，用 cl100k_base 作为近似估算
     """
-    if provider in ("openai", "deepseek", "minimax", "kimi", "qwen", "anthropic"):
+    if provider in ("openai", "deepseek", "minimax", "kimi", "qwen", "anthropic", "gemini"):
         return _get_encoding("cl100k_base")
     # 默认 fallback
     return _get_encoding("cl100k_base")
