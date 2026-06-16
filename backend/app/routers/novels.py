@@ -20,6 +20,7 @@ from app.schemas.ai import (
 )
 from app.schemas.export import NovelExportPdfIn
 from app.schemas.novel import NovelCreate, NovelOut, NovelUpdate
+from app.schemas.workflow_stage import NovelWorkflowStageGenerateIn
 from app.services.novel_export_pdf import build_novel_pdf_bytes, safe_export_pdf_stem
 from app.observability.otel_ai import ai_span
 from app.services.novel_ai import (
@@ -33,6 +34,136 @@ router = APIRouter(prefix="/novels", tags=["novels"])
 log = logging.getLogger(__name__)
 
 _STREAM_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+def _clip_workflow_text(value: str | None, limit: int) -> str:
+    text = (value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "..."
+
+
+def _workflow_stage_messages(
+    novel: Novel,
+    chapters: list[Chapter],
+    body: NovelWorkflowStageGenerateIn,
+) -> tuple[str, str]:
+    title = novel.title or "未命名作品"
+    genre = novel.genre or "未填写"
+    style = novel.writing_style or "未填写"
+    background = _clip_workflow_text(novel.background, 2400) or "未填写"
+    global_outline = _clip_workflow_text(body.global_outline, 6000) or "未填写"
+    volume_outline = _clip_workflow_text(body.volume_outline, 6000) or "未填写"
+    chapter_outline = _clip_workflow_text(body.chapter_outline, 6000) or "未填写"
+    chapter_brief = "\n".join(
+        f"{idx + 1}. {chapter.title or '未命名章节'}：{_clip_workflow_text(chapter.summary, 260)}"
+        for idx, chapter in enumerate(chapters[-20:])
+    ) or "暂无章节"
+
+    if body.stage == "global":
+        system = (
+            "你是资深中文长篇小说策划编辑。只输出可直接保存的大纲正文，"
+            "不要输出思考过程、解释或 Markdown 代码块。"
+        )
+        user_msg = f"""请为这部小说生成一份可执行的故事总纲。
+
+【作品】
+标题：{title}
+类型：{genre}
+文风：{style}
+背景设定：{background}
+
+【输出要求】
+1. 包含核心卖点、主线冲突、主要人物、世界观、分卷方向、阶段性爽点和结局方向。
+2. 适合长篇网文连续生成，注意伏笔、升级节奏和人物成长。
+3. 用中文输出，结构清晰，可直接粘贴进项目的“故事总纲”框。"""
+    elif body.stage == "volume":
+        system = (
+            "你是资深中文长篇小说分卷策划。只输出分卷大纲正文，"
+            "不要输出思考过程、解释或 Markdown 代码块。"
+        )
+        user_msg = f"""请基于故事总纲拆分分卷大纲。
+
+【作品】
+标题：{title}
+类型：{genre}
+文风：{style}
+
+【故事总纲】
+{global_outline}
+
+【输出要求】
+1. 每卷包含：卷名、阶段目标、主要冲突、人物变化、关键爽点、结尾钩子。
+2. 分卷之间要递进，避免重复同一类冲突。
+3. 用中文输出，可直接保存为“分卷大纲”。"""
+    elif body.stage == "chapter":
+        system = (
+            "你是资深中文长篇小说章节策划。只输出章节大纲，"
+            "不要输出思考过程、解释或 Markdown 代码块。"
+        )
+        user_msg = f"""请基于分卷大纲拆成章节大纲。
+
+【作品】
+标题：{title}
+类型：{genre}
+文风：{style}
+
+【故事总纲】
+{global_outline}
+
+【分卷大纲】
+{volume_outline}
+
+【已存在章节】
+{chapter_brief}
+
+【输出格式】
+每章之间用一个空行分隔；每章第一行写章节标题，后面用 2-4 句写章节摘要。不要写正文。"""
+    else:
+        target = next((chapter for chapter in chapters if chapter.id == body.target_chapter_id), None)
+        if target is None:
+            target = next((chapter for chapter in chapters if not (chapter.content or "").strip()), None)
+        if target is None and chapters:
+            target = chapters[-1]
+        target_title = target.title if target else "未选择章节"
+        target_summary = target.summary if target else chapter_outline
+        previous = [chapter for chapter in chapters if target is None or chapter.sort_order < target.sort_order][-5:]
+        previous_brief = "\n".join(
+            f"{chapter.title or '未命名章节'}：{_clip_workflow_text(chapter.summary or chapter.content, 360)}"
+            for chapter in previous
+        ) or "暂无前文"
+        system = (
+            "你是专业中文长篇小说作者。只输出章节正文，不要输出章节标题、解释、"
+            "思考过程或 Markdown 代码块。"
+        )
+        user_msg = f"""请根据下面信息生成本章正文。
+
+【作品】
+标题：{title}
+类型：{genre}
+文风：{style}
+背景设定：{background}
+
+【故事总纲】
+{global_outline}
+
+【分卷大纲】
+{volume_outline}
+
+【前文摘要】
+{previous_brief}
+
+【目标章节】
+标题：{target_title}
+摘要：{target_summary or '未填写'}
+
+【写作要求】
+1. 直接写正文，不要复述设定。
+2. 与前文自然衔接，人物行为符合设定。
+3. 推进新剧情，避免重复已发生事件。
+4. 中文输出，适合作为章节正文初稿。"""
+
+    return system, user_msg
 
 
 @router.get("", response_model=list[NovelOut])
@@ -64,6 +195,67 @@ def _get_owned_novel(db: Session, user_id: int, novel_id: int) -> Novel:
     if n is None or n.user_id != user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="作品不存在")
     return n
+
+
+@router.post("/{novel_id}/ai-workflow-stage")
+def novel_ai_workflow_stage(
+    novel_id: int,
+    body: NovelWorkflowStageGenerateIn,
+    user: CurrentUser,
+    db: Annotated[Session, Depends(get_db)],
+):
+    novel = _get_owned_novel(db, user.id, novel_id)
+    provider_name = (body.provider or "").strip().lower() or None
+    if provider_name and provider_name not in list_available_providers():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"未配置 {provider_name} 的 API Key",
+        )
+    if not provider_name and not list_available_providers():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="未配置任何 LLM API Key",
+        )
+
+    chapters = (
+        db.query(Chapter)
+        .filter(Chapter.novel_id == novel_id)
+        .order_by(Chapter.sort_order, Chapter.id)
+        .all()
+    )
+    system, user_msg = _workflow_stage_messages(novel, chapters, body)
+    action = {
+        "global": "AI故事总纲",
+        "volume": "AI分卷大纲",
+        "chapter": "AI章节大纲",
+        "body": "AI章节正文",
+    }[body.stage]
+
+    def gen():
+        try:
+            llm = resolve_llm_for_user(
+                user,
+                provider_name,
+                explicit_model=(body.model or "").strip() or None,
+                db=db,
+                action=action,
+            )
+        except ValueError as e:
+            yield ndjson_line({"error": str(e)})
+            return
+        buf: list[str] = []
+        try:
+            with ai_span("novel.workflow_stage.stream_complete", novel_id=novel_id, stage=body.stage):
+                for part in filter_think_chunks(llm.stream_complete(system, user_msg)):
+                    buf.append(part)
+                    yield ndjson_line({"t": part})
+            yield ndjson_line({"text": "".join(buf).strip()})
+        except LLMRequestError as e:
+            yield ndjson_line({"error": e.message})
+        except Exception as e:
+            yield ndjson_line({"error": str(e) or "请求失败"})
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson", headers=_STREAM_HEADERS)
 
 
 @router.post("/{novel_id}/ai-chat")

@@ -276,7 +276,11 @@ export async function createChapter(novelId: number, payload: Partial<Chapter>) 
   return data;
 }
 
-export async function updateChapter(novelId: number, chapterId: number, payload: Partial<Chapter>) {
+export async function updateChapter(
+  novelId: number,
+  chapterId: number,
+  payload: Partial<Chapter> & { skip_version?: boolean }
+) {
   const { data } = await api.patch<Chapter>(`/novels/${novelId}/chapters/${chapterId}`, payload);
   return data;
 }
@@ -409,6 +413,35 @@ export async function novelAiChapterSummaryInspire(
   );
   const summary = r.summary ?? "";
   return { summary };
+}
+
+export async function generateWorkflowStage(
+  novelId: number,
+  payload: {
+    stage: "global" | "volume" | "chapter" | "body";
+    provider?: string | null;
+    model?: string | null;
+    global_outline?: string;
+    volume_outline?: string;
+    chapter_outline?: string;
+    target_chapter_id?: number | null;
+  },
+  onToken?: (chunk: string) => void
+) {
+  const r = await postNdjsonAi(
+    `/novels/${novelId}/ai-workflow-stage`,
+    {
+      stage: payload.stage,
+      provider: payload.provider || null,
+      model: payload.model || null,
+      global_outline: payload.global_outline ?? "",
+      volume_outline: payload.volume_outline ?? "",
+      chapter_outline: payload.chapter_outline ?? "",
+      target_chapter_id: payload.target_chapter_id ?? null,
+    },
+    { onToken }
+  );
+  return { text: r.text ?? "" };
 }
 
 /** 评估当前章节：NDJSON 流式 token + 最终 evaluate。正文传编辑器当前值（可含未保存）。 */

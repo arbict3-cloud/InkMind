@@ -193,6 +193,7 @@ def resolve_llm_for_user(
     user: object | None,
     explicit_provider: str | None,
     *,
+    explicit_model: str | None = None,
     db: Session | None = None,
     action: str = "LLM调用",
     accumulator: LLMUsageAccumulator | None = None,
@@ -205,12 +206,16 @@ def resolve_llm_for_user(
         if use_custom and custom_llm_id:
             from app.models import UserCustomLLM
             custom_llm = db.get(UserCustomLLM, custom_llm_id)
-            if custom_llm and custom_llm.user_id == getattr(user, "id", None):
+            if (
+                custom_llm
+                and custom_llm.user_id == getattr(user, "id", None)
+                and (not explicit_provider or custom_llm.provider.lower().strip() == provider_name)
+            ):
                 llm = get_llm_from_user_config(
                     custom_llm.provider,
                     custom_llm.api_key,
                     custom_llm.base_url,
-                    getattr(user, "preferred_llm_model", None),
+                    explicit_model or getattr(user, "preferred_llm_model", None),
                 )
                 uid = getattr(user, "id", None)
                 if uid is not None:
@@ -227,7 +232,7 @@ def resolve_llm_for_user(
     if user is not None:
         user_model = getattr(user, "preferred_llm_model", None)
 
-    llm = get_llm(provider_name, model=user_model)
+    llm = get_llm(provider_name, model=explicit_model or user_model)
     if db is not None and user is not None:
         uid = getattr(user, "id", None)
         if uid is not None:

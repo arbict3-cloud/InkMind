@@ -33,6 +33,8 @@ import {
   fetchLlmProviders,
   fetchMemos,
   fetchNovel,
+  generateWorkflowStage,
+  updateChapter,
   updateMemo,
 } from "@/api/client";
 import type { BuiltinProviderInfo, Chapter, Memo, Novel } from "@/types";
@@ -129,6 +131,7 @@ export default function NovelWorkflow() {
   const [chapterOutline, setChapterOutline] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<StageKey | null>(null);
+  const [generating, setGenerating] = useState<StageKey | null>(null);
   const [err, setErr] = useState("");
 
   const globalMemo = useMemo(() => findMemoByTitle(memos, MEMO_TITLES.global), [memos]);
@@ -260,6 +263,68 @@ export default function NovelWorkflow() {
     }
   }
 
+  async function runAiStage(stage: StageKey) {
+    const config = models[stage];
+    const targetChapter = chapters.find((chapter) => !chapter.content.trim()) || chapters[0] || null;
+    if (stage === "volume" && !globalOutline.trim()) {
+      message.warning("请先生成或填写故事总纲");
+      return;
+    }
+    if (stage === "chapter" && !volumeOutline.trim()) {
+      message.warning("请先生成或填写分卷大纲");
+      return;
+    }
+    if (stage === "body" && !targetChapter) {
+      message.warning("请先在章节大纲阶段创建章节草稿");
+      return;
+    }
+
+    setErr("");
+    setGenerating(stage);
+    let streamed = "";
+    const applyText = (text: string) => {
+      if (stage === "global") setGlobalOutline(text);
+      if (stage === "volume") setVolumeOutline(text);
+      if (stage === "chapter") setChapterOutline(text);
+    };
+    if (stage !== "body") applyText("");
+    try {
+      const result = await generateWorkflowStage(
+        id,
+        {
+          stage,
+          provider: config.provider,
+          model: config.model,
+          global_outline: globalOutline,
+          volume_outline: volumeOutline,
+          chapter_outline: chapterOutline,
+          target_chapter_id: targetChapter?.id ?? null,
+        },
+        (chunk) => {
+          streamed += chunk;
+          if (stage !== "body") applyText(streamed);
+        }
+      );
+      const finalText = result.text || streamed;
+      if (stage === "global") setGlobalOutline(finalText);
+      if (stage === "volume") setVolumeOutline(finalText);
+      if (stage === "chapter") setChapterOutline(finalText);
+      if (stage === "body" && targetChapter) {
+        const updated = await updateChapter(id, targetChapter.id, {
+          content: finalText,
+          skip_version: true,
+        });
+        setChapters((prev) => prev.map((chapter) => chapter.id === updated.id ? updated : chapter));
+      }
+      message.success(stage === "body" ? "正文已生成到章节草稿" : "AI 已生成并填入");
+    } catch (e) {
+      setErr(apiErrorMessage(e));
+      message.error("AI 生成失败");
+    } finally {
+      setGenerating(null);
+    }
+  }
+
   function copyPrompt(stage: StageKey) {
     const config = models[stage];
     const promptMap: Record<StageKey, string> = {
@@ -369,13 +434,23 @@ export default function NovelWorkflow() {
                       onChange={(event) => setGlobalOutline(event.target.value)}
                       placeholder="在这里写或粘贴故事总纲：题材、主线、人物、世界观、结局方向..."
                     />
-                    <Button
-                      type="primary"
-                      loading={saving === "global"}
-                      onClick={() => upsertMemo("global", globalOutline)}
-                    >
-                      保存故事总纲
-                    </Button>
+                    <Space wrap>
+                      <Button
+                        icon={<ThunderboltOutlined />}
+                        loading={generating === "global"}
+                        disabled={generating !== null || saving !== null}
+                        onClick={() => void runAiStage("global")}
+                      >
+                        AI生成并填入
+                      </Button>
+                      <Button
+                        type="primary"
+                        loading={saving === "global"}
+                        onClick={() => upsertMemo("global", globalOutline)}
+                      >
+                        保存故事总纲
+                      </Button>
+                    </Space>
                   </>
                 ) : null}
 
@@ -387,13 +462,23 @@ export default function NovelWorkflow() {
                       onChange={(event) => setVolumeOutline(event.target.value)}
                       placeholder="在这里写或粘贴分卷大纲：第一卷、第二卷、每卷目标和钩子..."
                     />
-                    <Button
-                      type="primary"
-                      loading={saving === "volume"}
-                      onClick={() => upsertMemo("volume", volumeOutline)}
-                    >
-                      保存分卷大纲
-                    </Button>
+                    <Space wrap>
+                      <Button
+                        icon={<ThunderboltOutlined />}
+                        loading={generating === "volume"}
+                        disabled={generating !== null || saving !== null}
+                        onClick={() => void runAiStage("volume")}
+                      >
+                        AI生成并填入
+                      </Button>
+                      <Button
+                        type="primary"
+                        loading={saving === "volume"}
+                        onClick={() => upsertMemo("volume", volumeOutline)}
+                      >
+                        保存分卷大纲
+                      </Button>
+                    </Space>
                   </>
                 ) : null}
 
@@ -405,13 +490,23 @@ export default function NovelWorkflow() {
                       onChange={(event) => setChapterOutline(event.target.value)}
                       placeholder={"每章用空行分隔，例如：\n第一章 归来\n主角回到故乡，发现旧案线索。\n\n第二章 暗潮\n反派势力开始试探，主角被迫出手。"}
                     />
-                    <Button
-                      type="primary"
-                      loading={saving === "chapter"}
-                      onClick={() => void createChapterDrafts()}
-                    >
-                      生成章节草稿
-                    </Button>
+                    <Space wrap>
+                      <Button
+                        icon={<ThunderboltOutlined />}
+                        loading={generating === "chapter"}
+                        disabled={generating !== null || saving !== null}
+                        onClick={() => void runAiStage("chapter")}
+                      >
+                        AI生成并填入
+                      </Button>
+                      <Button
+                        type="primary"
+                        loading={saving === "chapter"}
+                        onClick={() => void createChapterDrafts()}
+                      >
+                        生成章节草稿
+                      </Button>
+                    </Space>
                   </>
                 ) : null}
 
@@ -432,6 +527,14 @@ export default function NovelWorkflow() {
                         <Link to={`/novels/${id}/write`}>
                           <Button type="primary" icon={<CheckCircleOutlined />}>去写作页生成正文</Button>
                         </Link>
+                        <Button
+                          icon={<ThunderboltOutlined />}
+                          loading={generating === "body"}
+                          disabled={generating !== null || saving !== null}
+                          onClick={() => void runAiStage("body")}
+                        >
+                          AI生成到第一个待写章节
+                        </Button>
                       </Space>
                     ) : (
                       <Empty description="先在章节大纲阶段创建章节草稿" />
@@ -449,7 +552,7 @@ export default function NovelWorkflow() {
         type="info"
         showIcon
         message="当前实现说明"
-        description="这是第一版可视化流程入口。它已经能保存总纲、卷纲、章纲并创建章节草稿；下一步可以继续把每个阶段的模型选择接到后端生成接口，让按钮直接调用指定模型生成内容。"
+        description="模型 API 已接入：总纲、卷纲、章纲会按当前阶段选择的 provider/model 生成并填入；正文阶段会生成到第一个待写正文的章节。"
       />
     </div>
   );
