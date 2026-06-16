@@ -12,6 +12,7 @@ import NovelMemos from "@/pages/NovelMemos";
 import NovelMemoForm from "@/pages/NovelMemoForm";
 import NovelSettings from "@/pages/NovelSettings";
 import NovelWrite from "@/pages/NovelWrite";
+import NovelWorkflow from "@/pages/NovelWorkflow";
 import Register from "@/pages/Register";
 import UsageDashboard from "@/pages/UsageDashboard";
 import AiSettings from "@/pages/AiSettings";
@@ -138,6 +139,7 @@ export default function App() {
         >
           <Route index element={<Navigate to="write" replace />} />
           <Route path="settings" element={<NovelSettings />} />
+          <Route path="workflow" element={<NovelWorkflow />} />
           <Route path="write" element={<NovelWrite />} />
           <Route path="people" element={<PeopleLayout />}>
             <Route index element={<NovelPeople />} />

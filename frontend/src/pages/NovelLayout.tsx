@@ -15,6 +15,7 @@ import {
   EditOutlined,
   TeamOutlined,
   FileTextOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import { apiErrorMessage, fetchNovel } from "@/api/client";
 import AppHeader, { useHeaderTheme } from "@/components/AppHeader";
@@ -34,6 +35,7 @@ export default function NovelLayout() {
 
   const peopleTabActive = loc.pathname.startsWith(`/novels/${id}/people`);
   const memosTabActive = loc.pathname.startsWith(`/novels/${id}/memos`);
+  const workflowTabActive = loc.pathname.startsWith(`/novels/${id}/workflow`);
   const writeTabActive = loc.pathname.includes("/write");
   const [novel, setNovel] = useState<Novel | null>(null);
   const [err, setErr] = useState("");
@@ -77,6 +79,15 @@ export default function NovelLayout() {
       ),
     },
     {
+      key: "workflow",
+      label: (
+        <Space>
+          <ThunderboltOutlined />
+          <span>创作流程</span>
+        </Space>
+      ),
+    },
+    {
       key: "people",
       label: (
         <Space>
@@ -98,6 +109,7 @@ export default function NovelLayout() {
 
   const getActiveTab = () => {
     if (loc.pathname.includes("/settings")) return "settings";
+    if (workflowTabActive) return "workflow";
     if (loc.pathname.includes("/write")) return "write";
     if (peopleTabActive) return "people";
     if (memosTabActive) return "memos";
