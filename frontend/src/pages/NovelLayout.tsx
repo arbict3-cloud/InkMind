@@ -139,12 +139,12 @@ export default function NovelLayout() {
         padding="0 1.5rem"
         headerStyle={{ flexWrap: "wrap", gap: "1rem" }}
         leftContent={
-          <div style={{ display: "flex", alignItems: "center", gap: "1rem", flex: 1, minWidth: 0, flexWrap: "wrap" }}>
+          <div className="novel-header-left" style={{ display: "flex", alignItems: "center", gap: "1rem", flex: 1, minWidth: 0, flexWrap: "wrap" }}>
             <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => nav("/")} size="large">
               {t("nav_back")}
             </Button>
             {novel && (
-              <Space size="small" style={{ flexShrink: 0 }}>
+              <Space size="small" className="novel-header-title" style={{ flexShrink: 0 }}>
                 <Title level={5} style={{
                   margin: 0,
                   fontFamily: '"Noto Serif SC", "DM Serif Display", Georgia, serif',
@@ -157,6 +157,7 @@ export default function NovelLayout() {
               </Space>
             )}
             <Tabs
+              className="novel-header-tabs"
               activeKey={getActiveTab()}
               items={tabItems}
               onChange={handleTabChange}

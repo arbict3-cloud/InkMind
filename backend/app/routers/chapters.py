@@ -15,7 +15,7 @@ from app.llm.metered_llm import llm_usage_session
 from app.llm.ndjson_stream import filter_think_chunks, ndjson_line
 from app.llm.sse_stream import SseStreamBuilder, convert_ndjson_chunk_to_sse
 from app.llm.providers import list_available_providers, normalize_provider_name, resolve_llm_for_user
-from app.models import Chapter, ChapterVersion
+from app.models import Chapter, ChapterVersion, UserCustomLLM
 from app.observability.otel_ai import ai_span
 from app.routers.novels import _get_owned_novel
 from app.schemas.chapter import (
@@ -123,6 +123,18 @@ def _llm_http_exc(e: LLMRequestError) -> HTTPException:
 _STREAM_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
+def _has_custom_generation_llm(user: CurrentUser, db: Session, provider: str | None = None) -> bool:
+    custom_id = getattr(user, "generation_custom_llm_id", None)
+    if not getattr(user, "generation_use_custom", False) or not custom_id:
+        return False
+    item = db.get(UserCustomLLM, custom_id)
+    if item is None or item.user_id != user.id:
+        return False
+    if provider and item.provider.lower().strip() != provider.lower().strip():
+        return False
+    return bool((item.api_key or "").strip())
+
+
 @router.post("/generate")
 def generate_chapter(
     novel_id: int,
@@ -133,7 +145,7 @@ def generate_chapter(
 ):
     novel = _get_owned_novel(db, user.id, novel_id)
     available = list_available_providers()
-    if not available:
+    if not available and not _has_custom_generation_llm(user, db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="未配置任何 LLM API Key，请在环境变量中设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY",
@@ -323,7 +335,7 @@ def generate_chapter_sse(
     """
     novel = _get_owned_novel(db, user.id, novel_id)
     available = list_available_providers()
-    if not available:
+    if not available and not _has_custom_generation_llm(user, db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="未配置任何 LLM API Key",
@@ -562,7 +574,7 @@ def generate_chapter_batch(
 ):
     novel = _get_owned_novel(db, user.id, novel_id)
     available = list_available_providers()
-    if not available:
+    if not available and not _has_custom_generation_llm(user, db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="未配置任何 LLM API Key，请在环境变量中设置 OPENAI_API_KEY 或 ANTHROPIC_API_KEY",
@@ -673,7 +685,7 @@ def suggest_title_for_chapter(
     language: Language,
 ):
     novel = _get_owned_novel(db, user.id, novel_id)
-    if not list_available_providers():
+    if not list_available_providers() and not _has_custom_generation_llm(user, db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="未配置任何 LLM API Key",
@@ -733,12 +745,12 @@ def ai_evaluate_chapter(
     novel = _get_owned_novel(db, user.id, novel_id)
     available = list_available_providers()
     prov = (body.llm_provider or "").lower().strip() or None
-    if prov and prov not in available:
+    if prov and prov not in available and not _has_custom_generation_llm(user, db, prov):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"该模型未配置或不可用。当前可用: {', '.join(available) or '无'}",
         )
-    if not available:
+    if not available and not _has_custom_generation_llm(user, db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="未配置任何 LLM API Key",
@@ -819,12 +831,12 @@ def selection_ai(
     novel = _get_owned_novel(db, user.id, novel_id)
     available = list_available_providers()
     prov = (body.llm_provider or "").lower().strip() or None
-    if prov and prov not in available:
+    if prov and prov not in available and not _has_custom_generation_llm(user, db, prov):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"该模型未配置或不可用。当前可用: {', '.join(available) or '无'}",
         )
-    if not available:
+    if not available and not _has_custom_generation_llm(user, db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="未配置任何 LLM API Key",
@@ -905,12 +917,12 @@ def revise_chapter(
     novel = _get_owned_novel(db, user.id, novel_id)
     available = list_available_providers()
     prov = (body.llm_provider or "").lower().strip() or None
-    if prov and prov not in available:
+    if prov and prov not in available and not _has_custom_generation_llm(user, db, prov):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"该模型未配置或不可用。当前可用: {', '.join(available) or '无'}",
         )
-    if not available:
+    if not available and not _has_custom_generation_llm(user, db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="未配置任何 LLM API Key",

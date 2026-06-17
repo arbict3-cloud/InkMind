@@ -632,6 +632,13 @@ export default function AiSettings() {
               </div>
             </Col>
           </Row>
+          <Alert
+            type="info"
+            showIcon
+            message={t("ai_settings_agent_note_title")}
+            description={t("ai_settings_agent_note_desc")}
+            style={{ marginTop: "1rem", borderRadius: 10 }}
+          />
         </Card>
 
         <Card

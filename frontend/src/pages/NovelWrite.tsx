@@ -75,7 +75,9 @@ export default function NovelWrite() {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [content, setContent] = useState("");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth >= 900 : true
+  );
   const [rightTool, setRightTool] = useState<AiTool | null>(null);
   const [commandPanelPos, setCommandPanelPos] = useState<{ left: number; top: number } | null>(null);
   const [commandPanelDragging, setCommandPanelDragging] = useState(false);
@@ -278,7 +280,11 @@ export default function NovelWrite() {
   const summaryRows = useMemo(() => estimateTextareaRows(summary, narrow ? 32 : 78, 3, 9), [summary, narrow]);
 
   useEffect(() => {
-    const onResize = () => setNarrow(window.innerWidth < 900);
+    const onResize = () => {
+      const nextNarrow = window.innerWidth < 900;
+      setNarrow(nextNarrow);
+      if (nextNarrow) setSidebarOpen(false);
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -463,7 +469,11 @@ export default function NovelWrite() {
         if (cancelled || novelIdRef.current !== id) return;
         setChapters(list);
         setVolumes(volumeList);
-        setLlmOptions(meta.builtin.map((p) => p.id));
+        const availableProviders = [
+          ...meta.builtin.map((p) => p.id),
+          ...meta.custom_llms.map((p) => p.provider),
+        ];
+        setLlmOptions(Array.from(new Set(availableProviders)));
         if (list.length > 0) {
           setActiveId(list[0].id);
         } else {

@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # DeepSeek 官方兼容接口：https://api.deepseek.com
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-flash"
     deepseek_send_temperature: bool = True
     deepseek_timeout: float = 120.0
 

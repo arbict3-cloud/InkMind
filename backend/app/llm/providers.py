@@ -30,6 +30,7 @@ _PROVIDER_DEFAULTS: dict[str, dict] = {
         "model": "deepseek-v4-flash",
         "send_temperature": True,
         "timeout": 120.0,
+        "extra_body": {"thinking": {"type": "disabled"}},
     },
     "minimax": {
         "base_url": "https://api.minimax.io/v1",
@@ -164,12 +165,14 @@ def get_llm_from_user_config(
     effective_model = model or defaults.get("model", "gpt-4o-mini")
     send_temperature = defaults.get("send_temperature", True)
     timeout = defaults.get("timeout", 120.0)
+    extra_body = defaults.get("extra_body")
     return OpenAICompatibleLLM(
         api_key=api_key,
         base_url=effective_base_url,
         model=effective_model,
         send_temperature=send_temperature,
         timeout=timeout,
+        extra_body=extra_body,
     )
 
 

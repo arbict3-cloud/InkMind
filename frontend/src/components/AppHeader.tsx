@@ -145,6 +145,7 @@ export default function AppHeader({
 
   return (
     <Header
+      className="app-header"
       style={{
         padding,
         background: colors.headerBg,
@@ -158,9 +159,9 @@ export default function AppHeader({
         ...headerStyle,
       }}
     >
-      {leftContent}
+      <div className="app-header__left">{leftContent}</div>
 
-      <Space size="middle">
+      <Space size="middle" className="app-header__actions">
         {extraActions}
 
         <Dropdown menu={{ items: languageMenuItems }} placement="bottomRight">
@@ -206,7 +207,7 @@ export default function AppHeader({
             >
               {user?.display_name?.charAt(0) || user?.email?.charAt(0)}
             </Avatar>
-            <div style={{ lineHeight: 1.2 }}>
+            <div className="app-header__user-text" style={{ lineHeight: 1.2 }}>
               <Text
                 strong
                 style={{

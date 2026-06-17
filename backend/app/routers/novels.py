@@ -52,73 +52,135 @@ def _workflow_stage_messages(
     genre = novel.genre or "未填写"
     style = novel.writing_style or "未填写"
     background = _clip_workflow_text(novel.background, 2400) or "未填写"
-    global_outline = _clip_workflow_text(body.global_outline, 6000) or "未填写"
-    volume_outline = _clip_workflow_text(body.volume_outline, 6000) or "未填写"
-    chapter_outline = _clip_workflow_text(body.chapter_outline, 6000) or "未填写"
+    reference = _clip_workflow_text(body.reference_text, 5000) or "无"
+    world = _clip_workflow_text(body.world, 7000) or "未采纳"
+    story = _clip_workflow_text(body.story, 7000) or "未采纳"
+    characters = _clip_workflow_text(body.characters, 7000) or "未采纳"
+    book_outline = _clip_workflow_text(body.book_outline, 8000) or "未采纳"
+    volume_outline = _clip_workflow_text(body.volume_outline, 8000) or "未采纳"
+    chapter_outline = _clip_workflow_text(body.chapter_outline, 8000) or "未采纳"
+    planner_notes = _clip_workflow_text(body.planner_notes, 5000) or "无"
     chapter_brief = "\n".join(
-        f"{idx + 1}. {chapter.title or '未命名章节'}：{_clip_workflow_text(chapter.summary, 260)}"
+        f"{idx + 1}. {chapter.title or '未命名章节'}：{_clip_workflow_text(chapter.summary or chapter.content, 320)}"
         for idx, chapter in enumerate(chapters[-20:])
     ) or "暂无章节"
 
-    if body.stage == "global":
-        system = (
-            "你是资深中文长篇小说策划编辑。只输出可直接保存的大纲正文，"
-            "不要输出思考过程、解释或 Markdown 代码块。"
-        )
-        user_msg = f"""请为这部小说生成一份可执行的故事总纲。
+    system = (
+        "你是资深中文长篇小说策划编辑和网文作者。"
+        "只输出可直接保存到创作工具里的正文内容，不要输出思考过程、解释、寒暄或 Markdown 代码块。"
+        "内容必须原创；参考作品只能用于拆解结构和创作方法，不能照搬人物、专有名词、剧情细节。"
+    )
+
+    if body.stage == "world":
+        user_msg = f"""请生成或重构一份原创小说世界观。
 
 【作品】
 标题：{title}
 类型：{genre}
 文风：{style}
-背景设定：{background}
+背景备注：{background}
+
+【用户参考或要求】
+{reference}
 
 【输出要求】
-1. 包含核心卖点、主线冲突、主要人物、世界观、分卷方向、阶段性爽点和结局方向。
-2. 适合长篇网文连续生成，注意伏笔、升级节奏和人物成长。
-3. 用中文输出，结构清晰，可直接粘贴进项目的“故事总纲”框。"""
+1. 如果用户提供参考作品拆解，请先抽象其结构方法，再生成新的原创世界观。
+2. 如果用户只提供类型方向，例如修仙、科幻、都市异能，请直接构造完整世界观。
+3. 输出必须包含：世界核心概念、地理/势力格局、历史源流、力量体系、社会秩序、资源与限制、主要矛盾、主题表达、可持续展开的故事接口。
+4. 名称、规则、冲突必须原创，避免简单替换参考作品名词。
+5. 结构清晰，内容详细，适合后续生成故事创意、人物和大纲。"""
+    elif body.stage == "story":
+        user_msg = f"""请基于已采纳世界观，设计多个有趣的长篇小说核心故事方案，并推荐最适合展开的一条。
+
+【已采纳世界观】
+{world}
+
+【用户补充要求】
+{reference}
+
+【输出要求】
+1. 先给出 3-5 个故事创意方向，每个包含主角处境、核心冲突、爽点/悬念、反转潜力。
+2. 再选择一个最适合长篇连载的方案，展开为详细故事种子。
+3. 明确主线问题、阶段性目标、敌我关系、核心秘密、情绪卖点和结局张力。
+4. 不要写成完整大纲，这一步重点是“这个世界里最有意思的故事是什么”。"""
+    elif body.stage == "character":
+        user_msg = f"""请根据已采纳世界观和故事创意，生成人物卡。
+
+【已采纳世界观】
+{world}
+
+【已采纳故事创意】
+{story}
+
+【用户补充要求】
+{reference}
+
+【输出要求】
+1. 至少包含主角、关键同伴、主要对手、灰色立场人物、推动世界秘密的人物。
+2. 每张人物卡包含：姓名/称号、身份、外在目标、真实欲望、性格关键词、能力或资源、致命缺陷、与主线关系、人物成长线、可制造冲突的关系网。
+3. 人物性格必须服务剧情，不要只写标签。
+4. 可以额外给出“人物之间最有戏的矛盾组合”。"""
+    elif body.stage == "book":
+        user_msg = f"""请基于已采纳世界观、故事创意和人物卡，生成详细全书大纲。
+
+【已采纳世界观】
+{world}
+
+【已采纳故事创意】
+{story}
+
+【已采纳人物卡】
+{characters}
+
+【用户补充要求】
+{reference}
+
+【输出要求】
+1. 输出长篇小说全书大纲，详细一些。
+2. 包含开局钩子、主线推进、人物成长、关键反转、世界秘密揭露节奏、阶段高潮、最终结局方向。
+3. 标出主要伏笔、回收点和中后期升级方向。
+4. 不要进入逐章细纲，重点是全书结构。"""
     elif body.stage == "volume":
-        system = (
-            "你是资深中文长篇小说分卷策划。只输出分卷大纲正文，"
-            "不要输出思考过程、解释或 Markdown 代码块。"
-        )
-        user_msg = f"""请基于故事总纲拆分分卷大纲。
+        user_msg = f"""请基于全书大纲生成详细卷大纲。
 
-【作品】
-标题：{title}
-类型：{genre}
-文风：{style}
+【已采纳世界观】
+{world}
 
-【故事总纲】
-{global_outline}
+【已采纳人物卡】
+{characters}
+
+【已采纳全书大纲】
+{book_outline}
+
+【用户补充要求】
+{reference}
 
 【输出要求】
-1. 每卷包含：卷名、阶段目标、主要冲突、人物变化、关键爽点、结尾钩子。
-2. 分卷之间要递进，避免重复同一类冲突。
-3. 用中文输出，可直接保存为“分卷大纲”。"""
+1. 每卷独立成段，标题建议使用“第一卷：卷名”。
+2. 每卷包含：阶段定位、卷目标、主要冲突、人物变化、关键事件、高潮、结尾钩子、需要埋下或回收的伏笔。
+3. 卷与卷之间必须有递进，不要重复同一种危机。"""
     elif body.stage == "chapter":
-        system = (
-            "你是资深中文长篇小说章节策划。只输出章节大纲，"
-            "不要输出思考过程、解释或 Markdown 代码块。"
-        )
-        user_msg = f"""请基于分卷大纲拆成章节大纲。
+        user_msg = f"""请基于卷大纲拆出章节大纲。
 
-【作品】
-标题：{title}
-类型：{genre}
-文风：{style}
+【已采纳世界观】
+{world}
 
-【故事总纲】
-{global_outline}
+【已采纳人物卡】
+{characters}
 
-【分卷大纲】
+【已采纳卷大纲】
 {volume_outline}
 
 【已存在章节】
 {chapter_brief}
 
+【用户补充要求】
+{reference}
+
 【输出格式】
-每章之间用一个空行分隔；每章第一行写章节标题，后面用 2-4 句写章节摘要。不要写正文。"""
+每章之间用空行分隔。每章第一行写章节标题，后面写详细章节概要。
+每章概要需要包含：本章目标、冲突、场景推进、信息释放、人物变化、结尾钩子。
+不要写正文。"""
     else:
         target = next((chapter for chapter in chapters if chapter.id == body.target_chapter_id), None)
         if target is None:
@@ -129,39 +191,77 @@ def _workflow_stage_messages(
         target_summary = target.summary if target else chapter_outline
         previous = [chapter for chapter in chapters if target is None or chapter.sort_order < target.sort_order][-5:]
         previous_brief = "\n".join(
-            f"{chapter.title or '未命名章节'}：{_clip_workflow_text(chapter.summary or chapter.content, 360)}"
+            f"{chapter.title or '未命名章节'}：{_clip_workflow_text(chapter.summary or chapter.content, 520)}"
             for chapter in previous
         ) or "暂无前文"
-        system = (
-            "你是专业中文长篇小说作者。只输出章节正文，不要输出章节标题、解释、"
-            "思考过程或 Markdown 代码块。"
-        )
-        user_msg = f"""请根据下面信息生成本章正文。
+        if body.stage == "body":
+            user_msg = f"""请生成目标章节正文。
 
 【作品】
 标题：{title}
 类型：{genre}
 文风：{style}
-背景设定：{background}
+背景：{background}
 
-【故事总纲】
-{global_outline}
+【已采纳世界观】
+{world}
 
-【分卷大纲】
-{volume_outline}
+【已采纳人物卡】
+{characters}
+
+【全书/卷/章纲】
+全书大纲：{book_outline}
+卷大纲：{volume_outline}
+章节大纲：{chapter_outline}
+
+【策划建议】
+{planner_notes}
 
 【前文摘要】
 {previous_brief}
 
 【目标章节】
 标题：{target_title}
-摘要：{target_summary or '未填写'}
+概要：{target_summary or '未填写'}
 
 【写作要求】
-1. 直接写正文，不要复述设定。
-2. 与前文自然衔接，人物行为符合设定。
-3. 推进新剧情，避免重复已发生事件。
-4. 中文输出，适合作为章节正文初稿。"""
+1. 直接写正文，不要输出章节标题。
+2. 目标字数约 {body.target_words} 字，可以略有浮动。
+3. 不要复述设定，不要重复已发生情节，从目标章节的新场景直接推进。
+4. 人物行为必须符合人物卡和前文逻辑。
+5. 保持中文网文可读性，有场景、有动作、有情绪、有结尾钩子。"""
+        else:
+            user_msg = f"""请作为小说策划编辑，阅读当前全部已采纳内容和章节状态，提出可执行的优化建议。
+
+【世界观】
+{world}
+
+【故事创意】
+{story}
+
+【人物卡】
+{characters}
+
+【全书大纲】
+{book_outline}
+
+【卷大纲】
+{volume_outline}
+
+【章节大纲】
+{chapter_outline}
+
+【已有章节】
+{chapter_brief}
+
+【用户重点关注】
+{reference}
+
+【输出要求】
+1. 指出当前最值得加强的 5-10 个点。
+2. 分析情节哪里可以更有趣，人物哪里能更合理，冲突哪里可以升级。
+3. 给出可直接采纳的修改方案，而不是泛泛建议。
+4. 如果发现逻辑矛盾、动机薄弱、节奏问题，直接指出。"""
 
     return system, user_msg
 
@@ -206,16 +306,6 @@ def novel_ai_workflow_stage(
 ):
     novel = _get_owned_novel(db, user.id, novel_id)
     provider_name = (body.provider or "").strip().lower() or None
-    if provider_name and provider_name not in list_available_providers():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"未配置 {provider_name} 的 API Key",
-        )
-    if not provider_name and not list_available_providers():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="未配置任何 LLM API Key",
-        )
 
     chapters = (
         db.query(Chapter)
@@ -225,10 +315,14 @@ def novel_ai_workflow_stage(
     )
     system, user_msg = _workflow_stage_messages(novel, chapters, body)
     action = {
-        "global": "AI故事总纲",
+        "world": "AI世界观",
+        "story": "AI故事创意",
+        "character": "AI人物卡",
+        "book": "AI全书大纲",
         "volume": "AI分卷大纲",
         "chapter": "AI章节大纲",
         "body": "AI章节正文",
+        "planner": "AI策划分析",
     }[body.stage]
 
     def gen():

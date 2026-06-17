@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Layout,
   Card,
@@ -146,6 +146,42 @@ export default function UsageDashboard() {
   const quotaIsLow = hasQuota && quotaRemaining < quota!.token_quota! * 0.2;
   const quotaIsExceeded = hasQuota && quotaRemaining <= 0;
   const quotaStatusColor = quotaIsExceeded ? "#c64545" : quotaIsLow ? "#d4a017" : primaryColor;
+  const providerStats = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        provider: string;
+        source: string;
+        calls: number;
+        inputTokens: number;
+        outputTokens: number;
+        totalTokens: number;
+      }
+    >();
+
+    for (const item of data?.items || []) {
+      const provider = item.provider || "-";
+      const source = item.source || "builtin";
+      const key = `${provider}::${source}`;
+      const current =
+        map.get(key) ||
+        {
+          provider,
+          source,
+          calls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+        };
+      current.calls += 1;
+      current.inputTokens += item.input_tokens || 0;
+      current.outputTokens += item.output_tokens || 0;
+      current.totalTokens += item.total_tokens || 0;
+      map.set(key, current);
+    }
+
+    return [...map.values()].sort((a, b) => b.totalTokens - a.totalTokens);
+  }, [data]);
 
   function renderMetricCard({
     title,
@@ -380,6 +416,53 @@ export default function UsageDashboard() {
               </Col>
             )}
           </Row>
+        )}
+
+        {data && providerStats.length > 0 && (
+          <Card
+            className="ops-panel usage-provider-panel"
+            title={
+              <Space direction="vertical" size={2}>
+                <Title
+                  level={4}
+                  style={{
+                    margin: 0,
+                    fontFamily: '"Noto Serif SC", "DM Serif Display", Georgia, serif',
+                    color: textColor,
+                  }}
+                >
+                  {t("usage_provider_breakdown")}
+                </Title>
+                <Text type="secondary" style={{ color: secondaryTextColor, fontSize: "0.86rem" }}>
+                  {t("usage_provider_breakdown_desc")}
+                </Text>
+              </Space>
+            }
+            style={{ marginBottom: 20 }}
+          >
+            <div className="usage-provider-list">
+              {providerStats.map((item) => (
+                <div className="usage-provider-row" key={`${item.provider}-${item.source}`}>
+                  <div className="usage-provider-main">
+                    <Text strong style={{ color: textColor }}>
+                      {item.provider}
+                    </Text>
+                    <Tag color={item.source === "custom" ? "orange" : "blue"} style={{ marginLeft: 8 }}>
+                      {item.source === "custom" ? t("ai_settings_custom_tag") : t("ai_settings_builtin_tag")}
+                    </Tag>
+                    <Text type="secondary" style={{ color: secondaryTextColor, marginLeft: 8 }}>
+                      {fmtNum(item.calls)} 次调用
+                    </Text>
+                  </div>
+                  <div className="usage-provider-tokens">
+                    <span>输入 {fmtK(item.inputTokens)}</span>
+                    <span>输出 {fmtK(item.outputTokens)}</span>
+                    <strong style={{ color: primaryColor }}>总计 {fmtK(item.totalTokens)}</strong>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
         )}
 
         <Card

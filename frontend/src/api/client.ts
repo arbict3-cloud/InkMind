@@ -433,13 +433,19 @@ export async function novelAiChapterSummaryInspire(
 export async function generateWorkflowStage(
   novelId: number,
   payload: {
-    stage: "global" | "volume" | "chapter" | "body";
+    stage: "world" | "story" | "character" | "book" | "volume" | "chapter" | "body" | "planner";
     provider?: string | null;
     model?: string | null;
-    global_outline?: string;
+    reference_text?: string;
+    world?: string;
+    story?: string;
+    characters?: string;
+    book_outline?: string;
     volume_outline?: string;
     chapter_outline?: string;
+    planner_notes?: string;
     target_chapter_id?: number | null;
+    target_words?: number;
   },
   onToken?: (chunk: string) => void
 ) {
@@ -449,10 +455,16 @@ export async function generateWorkflowStage(
       stage: payload.stage,
       provider: payload.provider || null,
       model: payload.model || null,
-      global_outline: payload.global_outline ?? "",
+      reference_text: payload.reference_text ?? "",
+      world: payload.world ?? "",
+      story: payload.story ?? "",
+      characters: payload.characters ?? "",
+      book_outline: payload.book_outline ?? "",
       volume_outline: payload.volume_outline ?? "",
       chapter_outline: payload.chapter_outline ?? "",
+      planner_notes: payload.planner_notes ?? "",
       target_chapter_id: payload.target_chapter_id ?? null,
+      target_words: payload.target_words ?? 3000,
     },
     { onToken }
   );

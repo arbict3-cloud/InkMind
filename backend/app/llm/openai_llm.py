@@ -18,6 +18,7 @@ class OpenAICompatibleLLM(LLMProvider):
         model: str,
         send_temperature: bool = True,
         timeout: float = 120.0,
+        extra_body: dict | None = None,
     ) -> None:
         kwargs: dict = {"api_key": api_key, "timeout": timeout}
         if base_url:
@@ -25,6 +26,7 @@ class OpenAICompatibleLLM(LLMProvider):
         self._client = OpenAI(**kwargs)
         self._model = model
         self._send_temperature = send_temperature
+        self._extra_body = extra_body
 
     def _chat_temperature(self) -> float | None:
         if not self._send_temperature:
@@ -48,6 +50,8 @@ class OpenAICompatibleLLM(LLMProvider):
                 payload["max_completion_tokens"] = max_tokens
             else:
                 payload["max_tokens"] = max_tokens
+        if self._extra_body:
+            payload["extra_body"] = self._extra_body
         try:
             stream = self._client.chat.completions.create(**payload)
         except (APIError, APIConnectionError, APITimeoutError, RateLimitError) as e:
@@ -88,12 +92,14 @@ class QwenLLM(OpenAICompatibleLLM):
 
 class DeepSeekLLM(OpenAICompatibleLLM):
     def __init__(self, model: str | None = None) -> None:
+        selected_model = model or settings.deepseek_model
         super().__init__(
             api_key=settings.deepseek_api_key or "",
             base_url=settings.deepseek_base_url,
-            model=model or settings.deepseek_model,
+            model=selected_model,
             send_temperature=settings.deepseek_send_temperature,
             timeout=settings.deepseek_timeout,
+            extra_body={"thinking": {"type": "disabled"}} if selected_model.startswith("deepseek-v4") else None,
         )
 
 
