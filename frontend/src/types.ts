@@ -71,9 +71,20 @@ export type Novel = {
 export type Chapter = {
   id: number;
   novel_id: number;
+  volume_id?: number | null;
   title: string;
   summary: string;
   content: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Volume = {
+  id: number;
+  novel_id: number;
+  title: string;
+  summary: string;
   sort_order: number;
   created_at: string;
   updated_at: string;

@@ -22,6 +22,7 @@ import {
   fetchChapterVersions,
   fetchChapters,
   fetchLlmProviders,
+  fetchVolumes,
   generateChapter,
   generateChapterBatch,
   novelAiChapterSummaryInspire,
@@ -35,7 +36,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useI18n } from "@/i18n";
-import type { Chapter, ChapterVersion, ChapterVersionDiff } from "@/types";
+import type { Chapter, ChapterVersion, ChapterVersionDiff, Volume } from "@/types";
 import { normalizeBodyParagraphIndent } from "@/utils/bodyParagraphIndent";
 import { getCaretViewportPoint } from "@/utils/textareaCaretViewport";
 import EditorSettings, { useEditorSettings } from "@/components/write/EditorSettings";
@@ -69,6 +70,7 @@ export default function NovelWrite() {
   const { lineHeightId, lineWidthId, focusMode, setFocusMode, bodyFontSizePx, typewriterMode } = editorSettings;
 
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [volumes, setVolumes] = useState<Volume[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
@@ -457,9 +459,10 @@ export default function NovelWrite() {
     let cancelled = false;
     (async () => {
       try {
-        const [list, meta] = await Promise.all([fetchChapters(id), fetchLlmProviders()]);
+        const [list, volumeList, meta] = await Promise.all([fetchChapters(id), fetchVolumes(id), fetchLlmProviders()]);
         if (cancelled || novelIdRef.current !== id) return;
         setChapters(list);
+        setVolumes(volumeList);
         setLlmOptions(meta.builtin.map((p) => p.id));
         if (list.length > 0) {
           setActiveId(list[0].id);
@@ -1079,6 +1082,22 @@ export default function NovelWrite() {
     }
   }, [id, t, confirmAction, flushSave, loadChapters]);
 
+  const onMoveChapterToVolume = useCallback(async (chapterId: number, volumeId: number | null) => {
+    const nid = id;
+    setErr("");
+    try {
+      await flushSave();
+      if (novelIdRef.current !== nid) return;
+      const ch = await updateChapter(nid, chapterId, { volume_id: volumeId, skip_version: true });
+      if (novelIdRef.current !== nid) return;
+      setChapters((prev) => prev.map((item) => (item.id === ch.id ? ch : item)));
+    } catch (e) {
+      if (novelIdRef.current === nid) {
+        setErr(apiErrorMessage(e));
+      }
+    }
+  }, [id, flushSave]);
+
   async function onSummaryInspire() {
     const nid = id;
     if (!activeId || !hasLlm) return;
@@ -1580,11 +1599,13 @@ export default function NovelWrite() {
 
         <ChapterSidebar
           chapters={chapters}
+          volumes={volumes}
           activeId={activeId}
           sidebarOpen={sidebarOpen}
           onSelectChapter={selectChapter}
           onAddChapter={onAddChapter}
           onDeleteChapter={onDeleteChapterById}
+          onMoveChapter={onMoveChapterToVolume}
         />
 
         <div className="write-main write-main--with-rail">

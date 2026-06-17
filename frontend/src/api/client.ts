@@ -1,5 +1,5 @@
 import axios, { AxiosError } from "axios";
-import type { BackgroundTask, Chapter, ChapterVersion, ChapterVersionDiff, Character, CreateBatchTaskRequest, CreateSingleTaskRequest, CustomLlmInfo, LlmProvidersResponse, LlmUsageSummary, Memo, Novel, TaskProgress, User } from "@/types";
+import type { BackgroundTask, Chapter, ChapterVersion, ChapterVersionDiff, Character, CreateBatchTaskRequest, CreateSingleTaskRequest, CustomLlmInfo, LlmProvidersResponse, LlmUsageSummary, Memo, Novel, TaskProgress, User, Volume } from "@/types";
 import type {
   WorkflowProgress,
   CreateWorkflowRequest,
@@ -266,8 +266,23 @@ export async function fetchChapters(novelId: number) {
   return data;
 }
 
+export async function fetchVolumes(novelId: number) {
+  const { data } = await api.get<Volume[]>(`/novels/${novelId}/volumes`);
+  return data;
+}
+
+export async function createVolume(novelId: number, payload: Partial<Pick<Volume, "title" | "summary" | "sort_order">>) {
+  const { data } = await api.post<Volume>(`/novels/${novelId}/volumes`, {
+    title: payload.title ?? "",
+    summary: payload.summary ?? "",
+    sort_order: payload.sort_order ?? 0,
+  });
+  return data;
+}
+
 export async function createChapter(novelId: number, payload: Partial<Chapter>) {
   const { data } = await api.post<Chapter>(`/novels/${novelId}/chapters`, {
+    volume_id: payload.volume_id ?? null,
     title: payload.title ?? "",
     summary: payload.summary ?? "",
     content: payload.content ?? "",

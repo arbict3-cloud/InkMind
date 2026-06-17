@@ -14,6 +14,7 @@ def _utc_dt(v: datetime) -> datetime:
 class ChapterOut(BaseModel):
     id: int
     novel_id: int
+    volume_id: int | None = None
     title: str
     summary: str
     content: str
@@ -29,6 +30,7 @@ class ChapterOut(BaseModel):
 
 
 class ChapterCreate(BaseModel):
+    volume_id: int | None = None
     title: str = Field(default="", max_length=512)
     summary: str = ""
     content: str = ""
@@ -36,6 +38,7 @@ class ChapterCreate(BaseModel):
 
 
 class ChapterUpdate(BaseModel):
+    volume_id: int | None = None
     title: str | None = Field(default=None, max_length=512)
     summary: str | None = None
     content: str | None = None
@@ -49,6 +52,7 @@ class ChapterUpdate(BaseModel):
 class ChapterOut(BaseModel):
     id: int
     novel_id: int
+    volume_id: int | None = None
     title: str
     summary: str
     content: str

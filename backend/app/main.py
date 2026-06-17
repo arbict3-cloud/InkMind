@@ -7,7 +7,7 @@ from sqlalchemy import inspect, text
 from app.config import settings
 from app.database import Base, engine
 from app.observability.otel_setup import setup_otel
-from app.routers import admin, agent, auth, background_tasks, chapters, characters, custom_llms, memos, meta, novels, usage, workflow
+from app.routers import admin, agent, auth, background_tasks, chapters, characters, custom_llms, memos, meta, novels, usage, volumes, workflow
 
 
 def _migrate_sqlite() -> None:
@@ -89,6 +89,24 @@ def _migrate_sqlite() -> None:
                 ncols = {c["name"] for c in insp.get_columns("novels")}
                 if "outline" in ncols and "background" not in ncols:
                     conn.execute(text("ALTER TABLE novels RENAME COLUMN outline TO background"))
+            if "volumes" not in table_names:
+                conn.execute(text("""
+                    CREATE TABLE volumes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        novel_id INTEGER NOT NULL REFERENCES novels(id) ON DELETE CASCADE,
+                        title VARCHAR(512) NOT NULL DEFAULT '',
+                        summary TEXT NOT NULL DEFAULT '',
+                        sort_order INTEGER NOT NULL DEFAULT 0,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                conn.execute(text("CREATE INDEX ix_volumes_novel_id ON volumes(novel_id)"))
+            if "chapters" in table_names:
+                cols_chapters = {c["name"] for c in insp.get_columns("chapters")}
+                if "volume_id" not in cols_chapters:
+                    conn.execute(text("ALTER TABLE chapters ADD COLUMN volume_id INTEGER REFERENCES volumes(id) ON DELETE SET NULL"))
+                    conn.execute(text("CREATE INDEX ix_chapters_volume_id ON chapters(volume_id)"))
             if "characters" in table_names:
                 cols = {c["name"] for c in insp.get_columns("characters")}
                 if "relationships" in cols:
@@ -141,6 +159,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(novels.router)
 app.include_router(chapters.router)
+app.include_router(volumes.router)
 app.include_router(characters.router)
 app.include_router(memos.router)
 app.include_router(meta.router)

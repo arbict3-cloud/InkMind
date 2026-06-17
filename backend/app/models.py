@@ -109,6 +109,12 @@ class Novel(Base):
         cascade="all, delete-orphan",
         order_by="Chapter.sort_order",
     )
+    volumes: Mapped[list["Volume"]] = relationship(
+        "Volume",
+        back_populates="novel",
+        cascade="all, delete-orphan",
+        order_by="Volume.sort_order",
+    )
     characters: Mapped[list["Character"]] = relationship(
         "Character", back_populates="novel", cascade="all, delete-orphan"
     )
@@ -117,11 +123,33 @@ class Novel(Base):
     )
 
 
+class Volume(Base):
+    __tablename__ = "volumes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    novel_id: Mapped[int] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(512), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
+
+    novel: Mapped["Novel"] = relationship("Novel", back_populates="volumes")
+    chapters: Mapped[list["Chapter"]] = relationship(
+        "Chapter",
+        back_populates="volume",
+        order_by="Chapter.sort_order",
+    )
+
+
 class Chapter(Base):
     __tablename__ = "chapters"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     novel_id: Mapped[int] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"))
+    volume_id: Mapped[int | None] = mapped_column(ForeignKey("volumes.id", ondelete="SET NULL"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(512), default="")
     summary: Mapped[str] = mapped_column(Text, default="")
     content: Mapped[str] = mapped_column(Text, default="")
@@ -132,6 +160,7 @@ class Chapter(Base):
     )
 
     novel: Mapped["Novel"] = relationship("Novel", back_populates="chapters")
+    volume: Mapped["Volume | None"] = relationship("Volume", back_populates="chapters")
     versions: Mapped[list["ChapterVersion"]] = relationship(
         "ChapterVersion", back_populates="chapter", cascade="all, delete-orphan"
     )

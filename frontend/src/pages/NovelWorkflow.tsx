@@ -29,15 +29,17 @@ import {
   apiErrorMessage,
   createChapter,
   createMemo,
+  createVolume,
   fetchChapters,
   fetchLlmProviders,
   fetchMemos,
   fetchNovel,
+  fetchVolumes,
   generateWorkflowStage,
   updateChapter,
   updateMemo,
 } from "@/api/client";
-import type { BuiltinProviderInfo, Chapter, Memo, Novel } from "@/types";
+import type { BuiltinProviderInfo, Chapter, Memo, Novel, Volume } from "@/types";
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
@@ -118,12 +120,27 @@ function parseChapterPlan(raw: string) {
     });
 }
 
+function parseVolumePlan(raw: string) {
+  return raw
+    .split(/\n(?=第[一二三四五六七八九十百千万0-9]+卷|卷[一二三四五六七八九十百千万0-9]+|[0-9]+[.、]\s*)/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block, index) => {
+      const lines = block.split(/\n/).map((line) => line.trim()).filter(Boolean);
+      const first = lines[0] ?? "";
+      const title = first.replace(/^[0-9]+[.、]\s*/, "").slice(0, 80) || `第${index + 1}卷`;
+      const summary = lines.length > 1 ? lines.slice(1).join("\n") : block;
+      return { title, summary };
+    });
+}
+
 export default function NovelWorkflow() {
   const { novelId } = useParams();
   const id = Number(novelId);
   const [novel, setNovel] = useState<Novel | null>(null);
   const [memos, setMemos] = useState<Memo[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [volumes, setVolumes] = useState<Volume[]>([]);
   const [providers, setProviders] = useState<BuiltinProviderInfo[]>([]);
   const [models, setModels] = useState<StageConfigMap>(DEFAULT_STAGE_CONFIG);
   const [globalOutline, setGlobalOutline] = useState("");
@@ -153,15 +170,17 @@ export default function NovelWorkflow() {
     if (!Number.isFinite(id)) return;
     (async () => {
       try {
-        const [novelData, memoList, chapterList, providerData] = await Promise.all([
+        const [novelData, memoList, chapterList, volumeList, providerData] = await Promise.all([
           fetchNovel(id),
           fetchMemos(id),
           fetchChapters(id),
+          fetchVolumes(id),
           fetchLlmProviders(),
         ]);
         setNovel(novelData);
         setMemos(memoList);
         setChapters(chapterList);
+        setVolumes(volumeList);
         setProviders(providerData.builtin);
         setGlobalOutline(findMemoByTitle(memoList, MEMO_TITLES.global)?.body || novelData.background || "");
         setVolumeOutline(findMemoByTitle(memoList, MEMO_TITLES.volume)?.body || "");
@@ -256,6 +275,32 @@ export default function NovelWorkflow() {
       }
       setChapters((prev) => [...prev, ...created]);
       message.success(`已创建 ${created.length} 个章节草稿`);
+    } catch (e) {
+      setErr(apiErrorMessage(e));
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function createVolumeDrafts() {
+    const plans = parseVolumePlan(volumeOutline);
+    if (!plans.length) {
+      message.warning("请先填写分卷大纲");
+      return;
+    }
+    setSaving("volume");
+    try {
+      const startOrder = volumes.length ? Math.max(...volumes.map((volume) => volume.sort_order)) + 1 : 0;
+      const created: Volume[] = [];
+      for (const [index, plan] of plans.entries()) {
+        created.push(await createVolume(id, {
+          title: plan.title,
+          summary: plan.summary,
+          sort_order: startOrder + index,
+        }));
+      }
+      setVolumes((prev) => [...prev, ...created]);
+      message.success(`已创建 ${created.length} 个卷目录`);
     } catch (e) {
       setErr(apiErrorMessage(e));
     } finally {
@@ -394,6 +439,7 @@ export default function NovelWorkflow() {
                   <span>{stage.title}</span>
                   {stage.key === "global" && globalMemo ? <Tag color="green">已保存</Tag> : null}
                   {stage.key === "volume" && volumeMemo ? <Tag color="green">已保存</Tag> : null}
+                  {stage.key === "volume" && volumes.length ? <Tag color="blue">{volumes.length} 卷</Tag> : null}
                   {stage.key === "chapter" && chapters.length ? <Tag color="green">{chapters.length} 章</Tag> : null}
                   {stage.key === "body" && chapters.some((chapter) => chapter.content.trim()) ? <Tag color="green">已有正文</Tag> : null}
                 </Space>
@@ -477,6 +523,12 @@ export default function NovelWorkflow() {
                         onClick={() => upsertMemo("volume", volumeOutline)}
                       >
                         保存分卷大纲
+                      </Button>
+                      <Button
+                        loading={saving === "volume"}
+                        onClick={() => void createVolumeDrafts()}
+                      >
+                        生成卷目录
                       </Button>
                     </Space>
                   </>

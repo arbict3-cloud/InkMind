@@ -708,11 +708,50 @@
   padding: 1px 3px 0 0;
 }
 
+.chapter-volume-group {
+  margin-bottom: 10px;
+}
+
+.chapter-volume-title {
+  margin: 10px 0 6px;
+  padding: 0 8px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
 .chapter-row {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
+}
+
+.chapter-volume-select {
+  flex-shrink: 0;
+  width: 84px;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid color-mix(in oklab, var(--write-hairline) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--write-canvas) 86%, transparent);
+  color: var(--write-muted);
+  font-size: 0.74rem;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.chapter-row:hover .chapter-volume-select,
+.chapter-volume-select:focus {
+  opacity: 1;
+}
+
+.chapter-volume-select:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--write-accent) 42%, var(--write-hairline));
+  color: var(--write-ink);
 }
 
 .chapter-item {

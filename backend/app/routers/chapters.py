@@ -1002,6 +1002,7 @@ def create_chapter(
     _get_owned_novel(db, user.id, novel_id)
     ch = Chapter(
         novel_id=novel_id,
+        volume_id=body.volume_id,
         title=body.title,
         summary=body.summary,
         content=body.content,
